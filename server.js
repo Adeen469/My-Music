@@ -262,4 +262,9 @@ app.delete("/api/library", async (req, res) => {
   }
 });
 
-app.listen(PORT, () => console.log(`My Music running at http://localhost:${PORT}`));
+// Local run: `npm start` listens. On Vercel, api/index.js imports this
+// app as a serverless function instead, so do not listen there.
+if (require.main === module) {
+  app.listen(PORT, () => console.log(`My Music running at http://localhost:${PORT}`));
+}
+module.exports = app;

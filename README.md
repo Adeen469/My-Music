@@ -70,6 +70,22 @@ empty state and a clear message instead of fake songs.
 - If a key is missing, the backend returns a `503` with a plain message
   (for example, "YOUTUBE_DATA_API is not set in .env") instead of fake data.
 
+## Deploying to Vercel
+
+This repo is Vercel-ready: `vercel.json` serves the frontend from `public/`
+and routes `/api/*` and `/auth/*` to the serverless function in `api/index.js`
+(which reuses `server.js`). Locally, `npm start` still runs the same Express
+app directly.
+
+After importing the repo into Vercel, set these environment variables in the
+Vercel project settings (Production) — do not paste real values in chat:
+`YOUTUBE_DATA_API`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`,
+`SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, and
+`GOOGLE_REDIRECT_URI` set to `https://<your-project>.vercel.app/auth/google/callback`
+(also add that URL as an authorised redirect URI in Google Cloud Console).
+Then redeploy. Until those variables are set, the deployed site will load
+but show the same "API not connected" message as locally.
+
 ## Project structure
 
 ```
