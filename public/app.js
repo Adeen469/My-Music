@@ -27,7 +27,14 @@ function render(items) {
 function play(item) {
   current = item;
   document.getElementById("player").hidden = false;
-  document.getElementById("playerFrame").src = `https://www.youtube.com/embed/${item.id}?autoplay=1&rel=0`;
+  // Privacy-enhanced embed (youtube-nocookie.com): YouTube's official
+  // mode that does not set tracking cookies before play and serves only
+  // non-personalised ads where ads are served at all. It is NOT a
+  // guaranteed ad blocker — YouTube itself states ads can still appear
+  // on monetised videos, and no in-app code can reliably strip ads from
+  // the cross-origin YouTube iframe. The only guaranteed ad-free
+  // playback is signing in with a YouTube Premium account.
+  document.getElementById("playerFrame").src = `https://www.youtube-nocookie.com/embed/${item.id}?autoplay=1&rel=0`;
   document.getElementById("nowTitle").textContent = item.title;
   document.getElementById("nowChannel").textContent = item.channel;
 }

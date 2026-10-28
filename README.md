@@ -43,6 +43,23 @@ empty state and a clear message instead of fake songs.
    ```
    Then open http://localhost:3000
 
+## Ads
+
+- My Music itself shows no ads: no banners, no AdSense, no ad SDK.
+- Playback uses YouTube's privacy-enhanced embed (`youtube-nocookie.com`),
+  which does not set tracking cookies before play. This is the closest
+  official option to an ad blocker inside an app, but it is **not a
+  guaranteed ad blocker**: YouTube states that ads can still be served
+  (non-personalised) on monetised videos, and no code in this app can
+  reliably strip ads out of YouTube's cross-origin iframe. Stripping
+  YouTube's video streams to bypass ads would also break YouTube's terms
+  and risk the API key, so this app does not do that.
+- The only guaranteed ad-free playback is playing while signed in with a
+  YouTube Premium account. A browser ad-blocker extension on your own
+  device (for example uBlock Origin) can also reduce ads in your own
+  browser, but that is outside this app and YouTube changes its ad
+  delivery often, so it is not guaranteed either.
+
 ## How it works
 
 - The browser never sees your YouTube API key or Supabase service key.
