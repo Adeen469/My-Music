@@ -196,7 +196,28 @@ app.get("/api/health", (req, res) => {
   });
 });
 
-app.get("/api/me", (req, res) => res.json({ user: AUTH_ENABLED ? getUser(req) : null, authEnabled: AUTH_ENABLED }));
+app.get("/api/me", async (req, res) => {
+  const user = AUTH_ENABLED ? getUser(req) : null;
+  if (!user || !user.email) return res.json({ user: null, authEnabled: AUTH_ENABLED });
+  // Admin approval enforcement (2026-11-01): a signed-in Google user
+  // who is not approved in Supabase is signed out here, so removing
+  // a user in /admin revokes them without waiting for their cookie
+  // to expire. If Supabase is not configured, existing sessions keep
+  // working, but new Google sign-ins are blocked in the callback —
+  // they are never silently approved.
+  if (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
+    try {
+      const row = await getRegisteredUser(user.email);
+      if (!row || row.status !== "approved") {
+        const isHttps = (req.get && req.get("x-forwarded-proto") === "https") || req.secure;
+        res.setHeader("Set-Cookie", `my_music_user=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax${isHttps ? "; Secure" : ""}`);
+        return res.json({ user: null, authEnabled: AUTH_ENABLED, registrationStatus: row ? row.status : "removed" });
+      }
+    } catch { /* transient DB error: do not revoke on a blip; the
+                 callback check is strict on the next sign-in */ }
+  }
+  return res.json({ user, authEnabled: AUTH_ENABLED });
+});
 
 // ---- YouTube Data API (proxied so the API key never reaches the browser) ----
 app.get("/api/search", async (req, res) => {
@@ -303,6 +324,36 @@ app.get("/auth/google/callback", async (req, res) => {
     });
     const profile = await meRes.json();
     const user = { name: profile.name || "", email: profile.email || "", picture: profile.picture || "" };
+    if (!user.email) throw new Error("Google did not return an email address");
+    // ---- Admin approval gate (2026-11-01, user request) ----
+    // First Google sign-in = a registration that needs admin
+    // permission. No one is signed in until an admin approves them
+    // in /admin (with the admin email/password, not Google).
+    // Approval lives in Supabase (my_music_users) because playlists
+    // and Library are browser-local and cannot be approved across
+    // devices from there. If Supabase is not configured, sign-in is
+    // paused with a clear message — it is never bypassed.
+    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+      return res.status(503).send("User registration requires admin approval, but Supabase is not configured yet. Ask the admin to set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in Vercel, run supabase/schema.sql (which creates the my_music_users table), and redeploy. Sign-in is paused until then.");
+    }
+    let row;
+    try {
+      row = await getRegisteredUser(user.email);
+    } catch (e) {
+      return res.status(500).send(`User approval check failed: ${e.message}. The admin needs to run supabase/schema.sql (my_music_users table) and redeploy.`);
+    }
+    if (!row) {
+      try {
+        await supabaseFetch("my_music_users", "POST", { user_email: user.email, name: user.name, picture: user.picture, status: "pending" });
+      } catch {
+        // Race (two sign-ins at once): re-read, do not fail the user.
+        try { row = await getRegisteredUser(user.email); } catch {}
+      }
+      if (!row) return res.redirect("/?registration=pending");
+    }
+    if (row && row.status !== "approved") {
+      return res.redirect(`/?registration=${row.status === "rejected" ? "rejected" : "pending"}`);
+    }
     const cookie = Buffer.from(JSON.stringify(user), "utf8").toString("base64url");
     const isHttps = (req.get && req.get("x-forwarded-proto") === "https") || req.secure;
     res.setHeader("Set-Cookie", `my_music_user=${encodeURIComponent(cookie)}; Path=/; Max-Age=2592000; HttpOnly; SameSite=Lax${isHttps ? "; Secure" : ""}`);
@@ -317,6 +368,14 @@ app.get("/auth/logout", (req, res) => {
   res.setHeader("Set-Cookie", `my_music_user=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax${isHttpsOut ? "; Secure" : ""}`);
   res.redirect("/");
 });
+
+// Registered users for admin approval (Supabase, server-side only).
+// Function declarations hoist, so the Google callback above can use
+// these even though they are defined here.
+async function getRegisteredUser(email) {
+  const rows = await supabaseFetch(`my_music_users?select=*&user_email=eq.${encodeURIComponent(email)}`);
+  return (rows || [])[0] || null;
+}
 
 // ---- Supabase: saved tracks (server-side only, service key never sent to browser) ----
 async function supabaseFetch(query, method = "GET", body) {
@@ -538,6 +597,60 @@ app.delete("/api/admin/saved-tracks", requireAdmin, async (req, res) => {
   try {
     await supabaseFetch(
       `saved_tracks?user_email=eq.${encodeURIComponent(email)}&video_id=eq.${encodeURIComponent(videoId)}`,
+      "DELETE"
+    );
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message });
+  }
+});
+
+// ---- Admin: user registrations (approve / reject / remove) ----
+app.get("/api/admin/users", requireAdmin, async (req, res) => {
+  try {
+    const rows = await supabaseFetch("my_music_users?select=user_email,name,picture,status,created_at,approved_at&order=created_at.desc&limit=200");
+    res.json({ users: rows || [] });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message });
+  }
+});
+app.post("/api/admin/users/approve", requireAdmin, async (req, res) => {
+  const email = ((req.body && req.body.email) || "").trim();
+  if (!email) return res.status(400).json({ error: "email is required" });
+  try {
+    await supabaseFetch(
+      `my_music_users?user_email=eq.${encodeURIComponent(email)}`,
+      "PATCH",
+      { status: "approved", approved_at: new Date().toISOString() }
+    );
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message });
+  }
+});
+app.post("/api/admin/users/reject", requireAdmin, async (req, res) => {
+  const email = ((req.body && req.body.email) || "").trim();
+  if (!email) return res.status(400).json({ error: "email is required" });
+  try {
+    await supabaseFetch(
+      `my_music_users?user_email=eq.${encodeURIComponent(email)}`,
+      "PATCH",
+      { status: "rejected", approved_at: null }
+    );
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message });
+  }
+});
+app.delete("/api/admin/users", requireAdmin, async (req, res) => {
+  const email = (req.query.email || "").trim();
+  if (!email) return res.status(400).json({ error: "email is required" });
+  try {
+    // Removing a user deletes their registration row. Their next
+    // Google sign-in creates a fresh pending registration, and
+    // /api/me revokes any existing session on its next check.
+    await supabaseFetch(
+      `my_music_users?user_email=eq.${encodeURIComponent(email)}`,
       "DELETE"
     );
     res.json({ ok: true });

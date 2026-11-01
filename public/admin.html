@@ -81,6 +81,15 @@
     </div>
 
     <div class="card">
+      <h2>User registrations — admin approval</h2>
+      <p class="note">A new user's first Google sign-in creates a <b>pending</b> registration and does not sign them in. Approve them here, and their next sign-in will work. Rejecting blocks sign-in. Removing deletes the registration — their next sign-in becomes a fresh pending request, and any existing session is revoked on its next check. If Supabase is not configured, this list cannot work and sign-in is paused (not bypassed).</p>
+      <div class="row" style="margin-top:10px;">
+        <button id="users-refresh-btn" class="btn-ghost">Refresh users</button>
+      </div>
+      <div id="users-list" style="margin-top:12px;"></div>
+    </div>
+
+    <div class="card">
       <h2>Saved tracks (Supabase, if configured)</h2>
       <p class="note">Playlists and Library songs saved in a visitor's browser cannot be seen or managed here — they live only in that browser. This table only covers tracks saved to Supabase through the server library API, when Supabase is configured.</p>
       <div id="saved-tracks" style="margin-top:12px;"></div>
@@ -103,6 +112,7 @@
         $("admin-name").textContent = data.admin.name || "Admin";
         $("admin-email-line").textContent = data.admin.email || "";
         loadHealth();
+        loadUsers();
         loadSavedTracks();
       } else {
         $("login-card").classList.remove("hidden");
@@ -155,6 +165,39 @@
         `<li>${t.title} — ${t.channel} (${t.durationSeconds || "?"}s)</li>`).join("") + "</ul>"
       : "<p class='note'>No playable results in India for that search.</p>";
   });
+  async function loadUsers() {
+    const box = $("users-list");
+    box.innerHTML = "<p class='note'>Loading…</p>";
+    const res = await fetch("/api/admin/users");
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { box.innerHTML = `<p class='note'>${data.error || "Users are not available (Supabase may not be configured, or the my_music_users table may not exist yet — run supabase/schema.sql)."}</p>`; return; }
+    const users = data.users || [];
+    if (!users.length) { box.innerHTML = "<p class='note'>No registrations yet. A new Google sign-in will appear here as pending.</p>"; return; }
+    box.innerHTML = `<table><thead><tr><th>User</th><th>Status</th><th>Registered</th><th></th></tr></thead><tbody>` +
+      users.map(u => `<tr>
+        <td>${u.name || ""}<br /><small>${u.user_email || ""}</small></td>
+        <td><b>${u.status || "pending"}</b></td>
+        <td><small>${u.created_at ? new Date(u.created_at).toLocaleString() : ""}</small></td>
+        <td><div class="row">
+          ${u.status !== "approved" ? `<button class="btn-ghost" style="padding:6px 12px;font-size:13px;" onclick="setUserStatus('${encodeURIComponent(u.user_email || "")}', 'approve')">Approve</button>` : ""}
+          ${u.status !== "rejected" ? `<button class="btn-ghost" style="padding:6px 12px;font-size:13px;" onclick="setUserStatus('${encodeURIComponent(u.user_email || "")}', 'reject')">Reject</button>` : ""}
+          <button class="btn-danger" onclick="removeUser('${encodeURIComponent(u.user_email || "")}')">Remove</button>
+        </div></td>
+      </tr>`).join("") + "</tbody></table>";
+  }
+  window.setUserStatus = async (email, action) => {
+    const res = await fetch(`/api/admin/users/${action}`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: decodeURIComponent(email) }),
+    });
+    if (res.ok) loadUsers(); else alert("Update failed");
+  };
+  window.removeUser = async (email) => {
+    if (!confirm("Remove this user? Their next sign-in will need approval again.")) return;
+    const res = await fetch(`/api/admin/users?email=${email}`, { method: "DELETE" });
+    if (res.ok) loadUsers(); else alert("Remove failed");
+  };
+  $("users-refresh-btn").addEventListener("click", loadUsers);
   async function loadSavedTracks() {
     const box = $("saved-tracks");
     box.innerHTML = "<p class='note'>Loading…</p>";

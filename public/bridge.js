@@ -485,6 +485,11 @@
     try {
       const res = await fetch("/api/me"); const data = await res.json();
       window.__currentUser = data.user || null;
+      if (!data.user && data.registrationStatus) {
+        if (data.registrationStatus === "removed") API.notify("Your account was removed by the admin.");
+        else if (data.registrationStatus === "rejected") API.notify("Your registration was not approved by the admin.");
+        else if (data.registrationStatus === "pending") API.notify("Your registration is waiting for admin approval.");
+      }
       const avatar = document.getElementById("user-avatar");
       if (avatar && data.user) {
         avatar.textContent = (data.user.name || data.user.email || "?")[0].toUpperCase();
@@ -514,6 +519,17 @@
   else document.addEventListener("DOMContentLoaded", bindPlayPauseSync);
 
   (async () => {
+    // Admin approval notices: the Google callback redirects here with
+    // ?registration=pending|rejected after a first/rejected sign-in.
+    // Show it once, then clean the URL so it does not repeat on reload.
+    try {
+      const params = new URLSearchParams(location.search);
+      const reg = params.get("registration");
+      if (reg === "pending") API.notify("Your registration is waiting for admin approval. You can still listen without signing in.");
+      else if (reg === "rejected") API.notify("Your registration was not approved by the admin.");
+      else if (reg === "removed") API.notify("Your account was removed by the admin.");
+      if (reg) history.replaceState({}, "", location.pathname);
+    } catch {}
     refreshMe();
     try {
       const health = await (await fetch("/api/health")).json();
