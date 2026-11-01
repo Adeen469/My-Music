@@ -4,52 +4,162 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>My Music</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700;900&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
+<!-- Top navigation: 56px, sticky -->
 <header class="topbar">
-  <div class="logo">♪ My Music</div>
-  <form id="searchForm" class="search">
-    <input id="searchInput" type="search" placeholder="Search songs, artists, albums" autocomplete="off">
-    <button type="submit">Search</button>
+  <button id="menuBtn" class="icon-btn" aria-label="Menu">☰</button>
+  <a class="logo" href="#" id="logoLink"><span class="logo-play">▶</span><span class="logo-text">My&nbsp;Music</span></a>
+  <form id="searchForm" class="search" role="search">
+    <input id="searchInput" type="search" placeholder="Search songs, artists, albums" autocomplete="off" aria-label="Search">
+    <button type="button" id="micBtn" class="icon-btn" aria-label="Voice search" title="Voice search">🎤</button>
+    <button type="submit" aria-label="Search">🔍</button>
+    <div id="suggestBox" class="suggest" hidden></div>
   </form>
-  <div id="authArea" class="auth"></div>
+  <div class="top-right">
+    <button id="castBtn" class="icon-btn" aria-label="Cast" title="Cast (not available in this web app)">📺</button>
+    <button id="settingsBtn" class="icon-btn" aria-label="Settings" title="Settings">⚙️</button>
+    <div id="authArea" class="auth"></div>
+  </div>
 </header>
+
 <div class="layout">
-  <nav class="sidebar">
-    <button data-view="home" class="nav active">Home</button>
-    <button data-view="library" class="nav">Library</button>
-    <button data-view="offline" class="nav">Offline</button>
-    <p class="hint">No sample songs. Everything here comes from the YouTube Data API or your saved tracks in Supabase. Playback uses YouTube's privacy-enhanced embed — it reduces tracking, but YouTube may still show non-personalised ads on some videos; only YouTube Premium removes them guaranteed.</p>
-    <p class="hint"><b>Downloads:</b> Download goes to your Downloads folder (on mobile: Files &gt; Downloads). “Save to a folder…” lets you pick a path where your browser supports it (desktop Chrome). Downloaded copies also stay in Offline here and play without internet. YouTube songs themselves have no file to download — Download on one asks you to attach your own / licensed file link for it.</p>
+  <!-- Sidebar: 240px desktop, 72px tablet, bottom nav on mobile -->
+  <nav class="sidebar" id="sidebar">
+    <button data-view="home" class="nav active"><span class="nav-icon">🏠</span><span class="nav-label">Home</span></button>
+    <button data-view="explore" class="nav"><span class="nav-icon">🧭</span><span class="nav-label">Explore</span></button>
+    <button data-view="library" class="nav"><span class="nav-icon">📚</span><span class="nav-label">Library</span></button>
+    <button data-view="offline" class="nav"><span class="nav-icon">⬇️</span><span class="nav-label">Offline</span></button>
+    <div class="side-section">
+      <h3>Your Mixes</h3>
+      <div id="mixList"></div>
+    </div>
+    <div class="side-section">
+      <h3>Playlists</h3>
+      <div id="playlistList"><p class="hint">Saved tracks appear here as a playlist.</p></div>
+    </div>
+    <p class="hint">No sample songs. Everything comes from the YouTube Data API, your saved tracks in Supabase, or files you add yourself. Playback uses YouTube's privacy-enhanced embed — ads can still appear on monetised videos; only YouTube Premium removes them guaranteed.</p>
+    <p class="hint"><b>Downloads:</b> Download goes to Downloads (mobile: Files &gt; Downloads). “Save to a folder…” picks a path where your browser supports it. Downloaded copies also stay in Offline and play without internet. YouTube songs have no file to download — Download on one asks you to attach your own / licensed file link.</p>
   </nav>
+
   <main>
     <div id="notice" class="notice" hidden></div>
-    <h2 id="sectionTitle">Trending music</h2>
-    <div id="addFileBox" class="add-file" hidden>
-      <b>Add your own audio file</b>
-      <form id="addFileForm">
-        <input id="fileTitle" placeholder="Song title" required>
-        <input id="fileChannel" placeholder="Artist">
-        <input id="fileUrl" placeholder="Direct audio link (MP3 etc., that you own or have rights to)" required>
-        <button type="submit">Add file track</button>
-      </form>
-    </div>
-    <div id="grid" class="grid"></div>
-    <p id="empty" class="empty" hidden>No results yet.</p>
+
+    <!-- Home / Explore view -->
+    <section id="homeView">
+      <div class="hero" id="hero" hidden>
+        <img id="heroArt" alt="">
+        <div class="hero-overlay"></div>
+        <div class="hero-text">
+          <h1 id="heroTitle"></h1>
+          <p id="heroSub"></p>
+          <div class="hero-actions">
+            <button id="heroPlay" class="btn-white">▶ Play</button>
+            <button id="heroShuffle" class="btn-outline">🔀 Shuffle</button>
+          </div>
+        </div>
+      </div>
+
+      <section class="carousel-section">
+        <div class="section-head"><h2 id="trendingTitle">Trending music</h2><button class="see-all" id="trendingSeeAll">See All &gt;</button></div>
+        <div class="carousel-wrap">
+          <button class="car-arrow left" data-target="trendingRow" aria-label="Scroll left">‹</button>
+          <div class="carousel" id="trendingRow"></div>
+          <button class="car-arrow right" data-target="trendingRow" aria-label="Scroll right">›</button>
+        </div>
+      </section>
+
+      <section class="carousel-section">
+        <div class="section-head"><h2>Artists</h2></div>
+        <div class="carousel-wrap">
+          <button class="car-arrow left" data-target="artistRow" aria-label="Scroll left">‹</button>
+          <div class="carousel" id="artistRow"></div>
+          <button class="car-arrow right" data-target="artistRow" aria-label="Scroll right">›</button>
+        </div>
+      </section>
+
+      <section class="song-table-section">
+        <div class="section-head"><h2>Top songs</h2></div>
+        <table class="song-table" aria-label="Top songs">
+          <thead><tr><th>#</th><th>Title</th><th>Album</th><th>Duration</th><th></th></tr></thead>
+          <tbody id="songTableBody"></tbody>
+        </table>
+        <p id="empty" class="empty" hidden>No results yet.</p>
+      </section>
+    </section>
+
+    <!-- Library / Offline / Search results view -->
+    <section id="listView" hidden>
+      <h2 id="sectionTitle">Library</h2>
+      <div id="addFileBox" class="add-file" hidden>
+        <b>Add your own audio file</b>
+        <form id="addFileForm">
+          <input id="fileTitle" placeholder="Song title" required>
+          <input id="fileChannel" placeholder="Artist">
+          <input id="fileUrl" placeholder="Direct audio link (MP3 etc., that you own or have rights to)" required>
+          <button type="submit">Add file track</button>
+        </form>
+      </div>
+      <div id="grid" class="grid"></div>
+      <p id="listEmpty" class="empty" hidden>No results yet.</p>
+    </section>
   </main>
 </div>
+
+<!-- Mini player / Now Playing bar: 72px, fixed bottom -->
 <footer class="player" id="player" hidden>
-  <iframe id="playerFrame" allow="autoplay; encrypted-media" allowfullscreen></iframe>
-  <audio id="audioPlayer" controls hidden></audio>
-  <div class="player-meta">
-    <div id="nowTitle"></div>
-    <div id="nowChannel"></div>
+  <div class="player-left">
+    <img id="playerArt" src="" alt="">
+    <div class="player-meta">
+      <div id="nowTitle"></div>
+      <div id="nowChannel"></div>
+    </div>
+    <span id="playingDot" class="playing-dot" aria-label="Now playing">▮▮▮</span>
   </div>
-  <button id="saveBtn">Save to Library</button>
-  <button id="downloadBtn">Download</button>
-  <button id="saveFolderBtn">Save to a folder…</button>
+  <div class="player-center">
+    <button id="shuffleBtn" class="icon-btn" aria-label="Shuffle">🔀</button>
+    <button id="prevBtn" class="icon-btn" aria-label="Previous">⏮</button>
+    <button id="playPauseBtn" class="play-btn" aria-label="Play or pause">▶</button>
+    <button id="nextBtn" class="icon-btn" aria-label="Next">⏭</button>
+    <button id="repeatBtn" class="icon-btn" aria-label="Repeat">🔁</button>
+  </div>
+  <div class="player-right">
+    <button id="lyricsBtn" class="icon-btn" aria-label="Lyrics">📝</button>
+    <button id="queueBtn" class="icon-btn" aria-label="Queue">☰</button>
+    <input id="volumeSlider" type="range" min="0" max="100" value="80" aria-label="Volume">
+    <button id="saveBtn">Save</button>
+    <button id="downloadBtn">Download</button>
+    <button id="saveFolderBtn">Save to a folder…</button>
+    <button id="expandBtn" class="icon-btn" aria-label="Expand player">⤢</button>
+  </div>
+  <div class="player-media" hidden>
+    <iframe id="playerFrame" allow="autoplay; encrypted-media" allowfullscreen></iframe>
+    <audio id="audioPlayer" controls></audio>
+  </div>
 </footer>
+
+<!-- Expanded player: full screen -->
+<div class="expanded" id="expanded" hidden>
+  <button id="collapseBtn" class="icon-btn">✕ Close</button>
+  <img id="expArt" src="" alt="">
+  <h2 id="expTitle"></h2>
+  <p id="expChannel"></p>
+  <div class="exp-lyrics" id="expLyrics">Lyrics are not available for this track in this app — no lyrics source is connected, so none are faked here.</div>
+  <h3>Up next (queue)</h3>
+  <div id="expQueue"></div>
+</div>
+
+<!-- Mobile bottom nav: <640px -->
+<nav class="bottom-nav">
+  <button data-view="home" class="nav active">🏠<span>Home</span></button>
+  <button data-view="explore" class="nav">🧭<span>Explore</span></button>
+  <button data-view="library" class="nav">📚<span>Library</span></button>
+  <button data-view="offline" class="nav">⬇️<span>Offline</span></button>
+</nav>
+
 <script src="/main.js"></script>
 </body>
 </html>
