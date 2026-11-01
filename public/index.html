@@ -1117,10 +1117,24 @@
       try { saved = JSON.parse(localStorage.getItem('my_music_saved_tracks') || '[]'); } catch {}
       try { files = JSON.parse(localStorage.getItem('my_music_file_tracks') || '[]'); } catch {}
       const all = [...saved, ...files];
+      const user = window.__currentUser || null;
       return `
         <div class="max-w-3xl">
           <h1 class="text-2xl sm:text-3xl font-bold mb-2">Your profile</h1>
-          <p class="text-sm text-zinc-400">No sign-in needed — Google sign-in is disabled for now. Your saved tracks live in this browser only.</p>
+          ${user ? `
+            <div class="flex items-center gap-3 mt-2">
+              ${user.picture ? `<img src="${user.picture}" class="w-12 h-12 rounded-full" />` : `<div class="w-12 h-12 rounded-full bg-zinc-800 flex items-center justify-center font-bold">${escapeHtml((user.name || user.email || '?')[0].toUpperCase())}</div>`}
+              <div>
+                <div class="font-medium">${escapeHtml(user.name || '')}</div>
+                <div class="text-sm text-zinc-400">${escapeHtml(user.email || '')}</div>
+              </div>
+            </div>
+            <a href="/auth/logout" class="inline-block mt-4 px-5 py-2.5 rounded-full border border-white/20 hover:bg-white/10 text-sm">Sign out</a>
+            <p class="text-sm text-zinc-400 mt-4">Signed in with Google. Your saved tracks below still live in this browser only.</p>
+          ` : `
+            <p class="text-sm text-zinc-400">Not signed in. Sign-in is optional — the app works without it, and saved tracks live in this browser only.</p>
+            <a href="/auth/google" class="inline-block mt-4 px-5 py-2.5 rounded-full bg-white text-black font-medium text-sm">Sign in with Google</a>
+          `}
           <div class="flex gap-6 mt-6">
             <div><div class="text-xl font-bold">${all.length}</div><div class="text-xs text-zinc-400">Saved tracks</div></div>
             <div><div class="text-xl font-bold">${state.likedIds.size}</div><div class="text-xs text-zinc-400">Liked</div></div>

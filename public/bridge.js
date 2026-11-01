@@ -389,7 +389,26 @@
   });
   API.on("onPlaylistSelect", () => { loadLibrary(); window.switchView("library"); });
   API.on("onCastClick", () => API.notify("Cast is not available in this web app."));
-  API.on("onProfileClick", () => { try { window.showProfile(); } catch { API.notify("No sign-in needed — Google sign-in is disabled for now."); } });
+  // Sign-in state: avatar shows your initial when signed in, and tapping
+  // it goes to your profile; when signed out it starts Google sign-in.
+  async function refreshMe() {
+    try {
+      const res = await fetch("/api/me"); const data = await res.json();
+      window.__currentUser = data.user || null;
+      const avatar = document.getElementById("user-avatar");
+      if (avatar && data.user) {
+        avatar.textContent = (data.user.name || data.user.email || "?")[0].toUpperCase();
+        avatar.title = data.user.email || data.user.name || "Profile";
+      }
+      if (typeof renderContent === "function") {
+        try { if (typeof routePage !== "undefined" && routePage && routePage.type === "profile") renderContent(); } catch {}
+      }
+    } catch {}
+  }
+  API.on("onProfileClick", () => {
+    if (window.__currentUser) { try { window.showProfile(); } catch {} }
+    else { window.location.href = "/auth/google"; }
+  });
   API.on("onArtistSelect", (name) => { try { window.showArtist(name); } catch {} });
   API.on("onCreatePlaylist", (name) => API.notify(`Playlist "${name}" is not saved yet — use Like (Save) to keep tracks in your Library for now.`));
 
@@ -403,6 +422,7 @@
   else document.addEventListener("DOMContentLoaded", bindPlayPauseSync);
 
   (async () => {
+    refreshMe();
     try {
       const health = await (await fetch("/api/health")).json();
       if (!health.youtubeConfigured) API.notify("YouTube API is not connected yet: set YOUTUBE_API_KEY in Vercel env vars, then redeploy. No sample songs are shown.");

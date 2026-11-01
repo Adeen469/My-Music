@@ -34,16 +34,31 @@ const YOUTUBE_API = process.env.YOUTUBE_API_KEY || process.env.YOUTUBE_DATA_API 
 // ADMIN_EMAIL / ADMIN_NAME are reserved for a future admin account.
 // ADMIN_PASSWORD must stay in Vercel env vars only — it is never read
 // into code here, never committed, and no admin login exists yet.
-// Google sign-in is DISABLED for now (2026-11-01, user decision):
-// no authentication is required to use the app. The Google routes
-// below are kept, not deleted, and return 503 while disabled.
-// To bring Google sign-in back later, set AUTH_ENABLED=true in Vercel
-// (and keep GOOGLE_CLIENT_ID/SECRET + the callback URI configured).
-const AUTH_ENABLED = process.env.AUTH_ENABLED === "true";
+// Google sign-in: ENABLED 2026-11-01 (user added GOOGLE_CLIENT_ID +
+// GOOGLE_CLIENT_SECRET in Vercel and asked to enable it). It turns on
+// automatically when both vars are present, so no AUTH_ENABLED=true
+// step is needed; set AUTH_ENABLED=false to turn it off again.
+// Sign-in is optional — the app still works without it, and saved
+// tracks still live in the browser. The session cookie below is NOT
+// a security boundary for the library API (which still takes an
+// email param); it only identifies the profile shown in the UI.
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || "";
-const GOOGLE_REDIRECT_URI =
-  process.env.GOOGLE_REDIRECT_URI || `http://localhost:${PORT}/auth/google/callback`;
+const AUTH_ENABLED = process.env.AUTH_ENABLED === "false"
+  ? false
+  : (process.env.AUTH_ENABLED === "true" || Boolean(GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET));
+// Redirect URI: if GOOGLE_REDIRECT_URI is set in Vercel, use it.
+// Otherwise derive it from the incoming request host, so production
+// automatically uses https://<your-domain>/auth/google/callback
+// instead of the old localhost default. That exact URI must be
+// registered in the Google Cloud OAuth client, or Google returns
+// redirect_uri_mismatch.
+function getRedirectUri(req) {
+  if (process.env.GOOGLE_REDIRECT_URI) return process.env.GOOGLE_REDIRECT_URI;
+  const proto = (req.get && req.get("x-forwarded-proto")) || req.protocol || "https";
+  const host = (req.get && req.get("host")) || `localhost:${PORT}`;
+  return `${proto}://${host}/auth/google/callback`;
+}
 const SUPABASE_URL = (process.env.SUPABASE_URL || "").replace(/\/$/, "");
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 
@@ -199,15 +214,15 @@ app.get("/api/related/:id", async (req, res) => {
   }
 });
 
-// ---- Google sign-in (OAuth 2.0) — DISABLED unless AUTH_ENABLED=true ----
+// ---- Google sign-in (OAuth 2.0) — enabled when ID+Secret are set ----
 app.get("/auth/google", (req, res) => {
-  if (!AUTH_ENABLED) return res.status(503).send("Google sign-in is disabled for now. No sign-in is needed to use My Music.");
+  if (!AUTH_ENABLED) return res.status(503).send("Google sign-in is not enabled. Add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in Vercel and redeploy.");
   if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
-    return res.status(503).send("GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET are not set in .env");
+    return res.status(503).send("GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET are not set. Add them in Vercel and redeploy.");
   }
   const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
   url.searchParams.set("client_id", GOOGLE_CLIENT_ID);
-  url.searchParams.set("redirect_uri", GOOGLE_REDIRECT_URI);
+  url.searchParams.set("redirect_uri", getRedirectUri(req));
   url.searchParams.set("response_type", "code");
   url.searchParams.set("scope", "openid email profile");
   url.searchParams.set("access_type", "offline");
@@ -216,7 +231,7 @@ app.get("/auth/google", (req, res) => {
 });
 
 app.get("/auth/google/callback", async (req, res) => {
-  if (!AUTH_ENABLED) return res.status(503).send("Google sign-in is disabled for now.");
+  if (!AUTH_ENABLED) return res.status(503).send("Google sign-in is not enabled.");
   const code = req.query.code;
   if (!code) return res.status(400).send("Missing code");
   try {
@@ -225,7 +240,7 @@ app.get("/auth/google/callback", async (req, res) => {
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
         code, client_id: GOOGLE_CLIENT_ID, client_secret: GOOGLE_CLIENT_SECRET,
-        redirect_uri: GOOGLE_REDIRECT_URI, grant_type: "authorization_code",
+        redirect_uri: getRedirectUri(req), grant_type: "authorization_code",
       }),
     });
     const tokens = await tokenRes.json();
@@ -236,7 +251,8 @@ app.get("/auth/google/callback", async (req, res) => {
     const profile = await meRes.json();
     const user = { name: profile.name || "", email: profile.email || "", picture: profile.picture || "" };
     const cookie = Buffer.from(JSON.stringify(user), "utf8").toString("base64url");
-    res.setHeader("Set-Cookie", `my_music_user=${encodeURIComponent(cookie)}; Path=/; Max-Age=2592000`);
+    const isHttps = (req.get && req.get("x-forwarded-proto") === "https") || req.secure;
+    res.setHeader("Set-Cookie", `my_music_user=${encodeURIComponent(cookie)}; Path=/; Max-Age=2592000; HttpOnly; SameSite=Lax${isHttps ? "; Secure" : ""}`);
     res.redirect("/");
   } catch (e) {
     res.status(500).send(`Google sign-in failed: ${e.message}`);
@@ -244,7 +260,8 @@ app.get("/auth/google/callback", async (req, res) => {
 });
 
 app.get("/auth/logout", (req, res) => {
-  res.setHeader("Set-Cookie", "my_music_user=; Path=/; Max-Age=0");
+  const isHttpsOut = (req.get && req.get("x-forwarded-proto") === "https") || req.secure;
+  res.setHeader("Set-Cookie", `my_music_user=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax${isHttpsOut ? "; Secure" : ""}`);
   res.redirect("/");
 });
 
