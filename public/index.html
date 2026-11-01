@@ -444,7 +444,8 @@
     let sidebarCollapsed = false;
     // --- SEPARATE PAGES (routing, like music.youtube.com) ---
     // routePage is null on Home/Explore/Library, otherwise one of:
-    // {type:'song', id}, {type:'artist', name}, {type:'profile'}
+    // {type:'artist', name}, {type:'profile'} — song pages were
+    // removed 2026-11-01 and are never set any more.
     let routePage = null;
     let routeData = { song: null, related: [], artistTracks: [], artistName: '' };
     let routeLoading = false;
@@ -685,9 +686,31 @@
     }
 
     // --- ROUTING ---
+    // SONG PAGE REMOVED 2026-11-01 (user: "this page must not be shown
+    // ever"). There is no song view any more: playing or tapping a
+    // song only plays it in the bottom player, on whatever view you
+    // are already on. An old /song/<id> or /watch?v=<id> link does not
+    // 404 and does not show a song page either: it opens Home, the
+    // URL is replaced with '/', and the bridge auto-plays that song.
     function songUrl(id) { return '/song/' + encodeURIComponent(id); }
     function artistUrl(name) { return '/artist/' + encodeURIComponent(name); }
-    function showSong(id) { goTo(songUrl(id)); }
+    async function showSong(id) {
+      // Tapping a song title used to open its song page; now it just
+      // plays that song where you are.
+      const existing = (typeof queue !== 'undefined' && queue.find(t => String(t.id) === String(id)))
+        || (typeof state !== 'undefined' && state.tracks.find(t => String(t.id) === String(id)));
+      if (existing) { playTrackById(id); return; }
+      try {
+        const res = await fetch(`/api/video/${encodeURIComponent(id)}`);
+        const video = await res.json();
+        if (!res.ok) throw new Error(video.error || 'Song not found');
+        window.MyMusicAPI.playTrack({
+          id: video.id, title: video.title, artist: video.channel, album: video.channel,
+          cover: video.thumbnail, audioUrl: video.downloadUrl || null, videoId: video.id,
+          duration: video.durationSeconds || 0,
+        });
+      } catch (e) { showToast(e.message || 'Song not found'); }
+    }
     function showArtist(name) { goTo(artistUrl(name)); }
     function showProfile() { goTo('/profile'); }
     function goTo(path) {
@@ -698,12 +721,19 @@
       const path = location.pathname;
       const params = new URLSearchParams(location.search);
       routePage = null;
-      if (path.startsWith('/song/')) { routePage = { type: 'song', id: decodeURIComponent(path.slice(6)) }; currentView = 'song'; routeLoading = true; }
-      else if (path.startsWith('/artist/')) { routePage = { type: 'artist', name: decodeURIComponent(path.slice(8)) }; currentView = 'artist'; routeLoading = true; }
+      let deepLinkSongId = null;
+      if (path.startsWith('/song/')) { deepLinkSongId = decodeURIComponent(path.slice(6)); }
+      else if (path === '/watch' && params.get('v')) { deepLinkSongId = params.get('v'); }
+      if (deepLinkSongId) {
+        // Never render a song page: show Home, drop the /song URL,
+        // and let the bridge auto-play this song (see bridge startup).
+        window.__deepLinkSongId = deepLinkSongId;
+        currentView = 'home';
+        if (location.pathname !== '/' || location.search) history.replaceState({}, '', '/');
+      } else if (path.startsWith('/artist/')) { routePage = { type: 'artist', name: decodeURIComponent(path.slice(8)) }; currentView = 'artist'; routeLoading = true; }
       else if (path === '/profile') { routePage = { type: 'profile' }; currentView = 'profile'; }
       else if (path === '/explore') { currentView = 'explore'; }
       else if (path === '/library') { currentView = 'library'; }
-      else if (path === '/watch' && params.get('v')) { routePage = { type: 'song', id: params.get('v') }; currentView = 'song'; }
       else { currentView = 'home'; }
       closeMobileSidebar();
       updateNavButtons(currentView);
@@ -829,7 +859,9 @@
     function renderContent() {
       const container = document.getElementById('content-area');
 
-      if (routePage && routePage.type === 'song') { container.innerHTML = renderSongView(); return; }
+      // No song view: routePage.type === 'song' is never set any more
+      // (see parseRoute). If an old value somehow survived, fall
+      // through to Home instead of ever rendering a song page.
       if (routePage && routePage.type === 'artist') { container.innerHTML = renderArtistView(); return; }
       if (routePage && routePage.type === 'profile') { container.innerHTML = renderProfileView(); return; }
 
@@ -1184,9 +1216,8 @@
     }
 
     // --- PLAYBACK LOGIC ---
-    function startPlayback(track, options) {
+    function startPlayback(track) {
       if (!track) return;
-      const shouldNavigate = !options || options.navigate !== false;
       document.getElementById('progress-scrubber').disabled = false;
 
       if (track.audioUrl) {
@@ -1207,29 +1238,12 @@
       emitEvent('onTrackPlay', track);
       loadTrackUI(track);
 
-      // Like YouTube Music: playing a song IS opening its page. Update
-      // the URL to /song/<id> with pushState (no reload, so the bottom
-      // player keeps playing) and show the song page. Back returns to
-      // the previous page. Already on that song's page: stay put.
-      // Next/Prev pass navigate:false (unless already on a song page),
-      // so they only change the player and the open drawer, and never
-      // force a page switch or close the drawer.
-      if (!shouldNavigate) {
-        if (typeof renderDrawerContent === 'function') renderDrawerContent();
-      } else if (!(routePage && routePage.type === 'song' && String(routePage.id) === String(track.id))) {
-        if (drawerOpen) toggleDrawer();
-        routePage = { type: 'song', id: track.id };
-        currentView = 'song';
-        if (!(routeData.song && String(routeData.song.id) === String(track.id))) {
-          routeData = { song: track, related: routeData.related || [], artistTracks: [], artistName: track.artist || '' };
-        }
-        routeLoading = false;
-        const path = songUrl(track.id);
-        if (location.pathname !== path) history.pushState({}, '', path);
-        updateNavButtons('song');
-        renderContent();
-        window.dispatchEvent(new CustomEvent('myMusicRoute', { detail: routePage }));
-      }
+      // SONG PAGE REMOVED 2026-11-01 (user: never show it). Playing
+      // a song never changes the view, the URL, or the drawer state:
+      // it only updates the bottom player (and the open drawer's
+      // highlight). This replaces the old "playing = opening its
+      // song page" behaviour and the Next/Prev navigate exception.
+      if (typeof renderDrawerContent === 'function' && drawerOpen) renderDrawerContent();
     }
 
     function loadTrackUI(track) {
@@ -1319,17 +1333,13 @@
       if (trackId) playTrackById(trackId);
     }
 
-    // Next/Prev are player controls, not "open this song" actions:
-    // they must play the next track in the bottom player without
-    // forcing the main view to a song page (and without closing the
-    // Now Playing drawer). The one exception is when you are already
-    // on a song page — then the page follows the new song, so the
-    // page, URL and player stay in sync. Tapping a song, Play, and
-    // autoplay still open that song's page as before.
+    // Next/Prev are player controls: they play the next track in the
+    // bottom player and never change the view (song pages no longer
+    // exist at all, see startPlayback).
     function nextTrack() {
       if (!queue.length) return;
       currentIndex = (currentIndex + 1) % queue.length;
-      startPlayback(queue[currentIndex], { navigate: routePage && routePage.type === 'song' });
+      startPlayback(queue[currentIndex]);
     }
 
     function prevTrack() {
@@ -1338,7 +1348,7 @@
         audio.currentTime = 0;
       } else {
         currentIndex = (currentIndex - 1 + queue.length) % queue.length;
-        startPlayback(queue[currentIndex], { navigate: routePage && routePage.type === 'song' });
+        startPlayback(queue[currentIndex]);
       }
     }
 

@@ -317,27 +317,21 @@
     });
   }
 
-  // ---- Separate pages: load song / artist / profile data on route change ----
+  // ---- Separate pages: load artist / profile data on route change ----
+  // SONG PAGE REMOVED 2026-11-01 (user: never show it). A song route
+  // can no longer reach here via parseRoute, but if one somehow does,
+  // play it on Home instead of ever rendering a song page.
   async function loadRoute(route) {
     if (!route) return;
     try {
       if (route.type === "song") {
-        // File tracks are local only: no YouTube lookup, and no error
-        // toast. The song page already has the track from the player.
-        if (String(route.id).startsWith("file-")) { routeLoading = false; renderContent(); return; }
-        // If the player just navigated here, the song is already known:
-        // fetch Related in the background without flashing a loading page.
-        const alreadyKnown = routeData.song && String(routeData.song.id) === String(route.id);
-        if (!alreadyKnown) { routeLoading = true; renderContent(); }
-        const [videoRes, relatedRes] = await Promise.all([
-          fetch(`/api/video/${encodeURIComponent(route.id)}`),
-          fetch(`/api/related/${encodeURIComponent(route.id)}`),
-        ]);
+        if (String(route.id).startsWith("file-")) { renderContent(); return; }
+        const videoRes = await fetch(`/api/video/${encodeURIComponent(route.id)}`);
         const video = await videoRes.json();
-        const related = relatedRes.ok ? await relatedRes.json() : { items: [] };
         if (!videoRes.ok) throw new Error(video.error || "Song not found");
-        routeData = { song: mapItem(video), related: (related.items || []).map(mapItem), artistTracks: [], artistName: video.channel || "" };
-        routeLoading = false; renderContent();
+        if (typeof history !== "undefined" && location.pathname !== "/") history.replaceState({}, "", "/");
+        window.MyMusicAPI.playTrack(mapItem(video));
+        renderContent();
       } else if (route.type === "artist") {
         routeLoading = true; renderContent();
         const res = await fetch(`/api/artist/${encodeURIComponent(route.name)}`);
@@ -428,8 +422,18 @@
       if (!health.youtubeConfigured) API.notify("YouTube API is not connected yet: set YOUTUBE_API_KEY in Vercel env vars, then redeploy. No sample songs are shown.");
     } catch { /* health is best-effort */ }
     // Deep link (parsed by index.html before this script ran) wins over home.
+    // A /song/<id> deep link is NOT a song page any more: parseRoute
+    // already replaced the URL with '/' and stored the id, so play
+    // that song on Home, then load the home catalog underneath it.
     try {
-      if (typeof routePage !== "undefined" && routePage) loadRoute(routePage);
+      if (typeof window.__deepLinkSongId !== "undefined" && window.__deepLinkSongId && !String(window.__deepLinkSongId).startsWith("file-")) {
+        const id = window.__deepLinkSongId;
+        window.__deepLinkSongId = null;
+        const videoRes = await fetch(`/api/video/${encodeURIComponent(id)}`);
+        const video = await videoRes.json();
+        if (videoRes.ok) window.MyMusicAPI.playTrack(mapItem(video));
+        loadTrending();
+      } else if (typeof routePage !== "undefined" && routePage) loadRoute(routePage);
       else loadTrending();
     } catch { loadTrending(); }
   })();
