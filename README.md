@@ -12,6 +12,10 @@ empty state and a clear message instead of fake songs.
 - Bottom player using the YouTube embed player
 - Sign in with Google (OAuth 2.0)
 - Save tracks to your Library, stored in Supabase (`saved_tracks` table)
+- Download + Offline: every card and the player have a Download button,
+  plus “Save to a folder…” where the browser supports a save picker.
+  Downloaded copies are also kept in the browser (IndexedDB) under
+  **Offline**, and play there without internet.
 
 ## Setup
 
@@ -42,6 +46,32 @@ empty state and a clear message instead of fake songs.
    npm start
    ```
    Then open http://localhost:3000
+
+## Downloads & offline — where files actually go
+
+- **Download** (no picker): the file goes to the browser's Downloads
+  folder. On a phone that is Files &gt; Downloads. The app cannot force
+  a different folder on mobile — that is a browser limit, not a bug.
+  To be asked every time, turn on “Ask where to save each file” in your
+  browser's download settings.
+- **Save to a folder…**: on desktop Chrome this opens a save picker, so
+  you choose the folder and filename. The button is hidden on browsers
+  without that picker, where Download (above) is the only option.
+- **Offline in the app**: every successful download is also stored in
+  IndexedDB in this browser and listed under **Offline**, where it plays
+  without internet. Removing it there only removes the in-app copy, not
+  the file already in Downloads.
+- **Add your own audio file**: Offline has a form for a title, artist
+  and direct audio link (MP3 etc.) that you own or have rights to. That
+  track plays with the HTML audio player (not the YouTube embed) and can
+  be downloaded the same way.
+- **YouTube tracks**: search / trending songs are YouTube embeds — there
+  is no audio file in this app to download, and this app does not extract
+  YouTube streams (that would break YouTube's terms and the artists'
+  rights, and risk the API key). On a YouTube track, Download asks you
+  to paste your own / licensed file link for that song, and downloads
+  that file instead. YouTube's own offline saving stays inside the
+  YouTube / YouTube Music app with Premium.
 
 ## Ads
 

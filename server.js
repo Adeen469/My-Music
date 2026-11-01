@@ -59,6 +59,10 @@ function mapVideo(item) {
     thumbnail:
       (s.thumbnails && (s.thumbnails.medium || s.thumbnails.default || {}).url) || "",
     publishedAt: s.publishedAt || "",
+    // YouTube tracks have no downloadable file: downloadUrl stays null.
+    // It is only set for saved / file tracks the user attached a direct
+    // audio link to (see /api/library and /api/library/download-url).
+    downloadUrl: null,
   };
 }
 async function youtube(pathname, params) {
@@ -227,6 +231,7 @@ app.get("/api/library", async (req, res) => {
     res.json({
       tracks: (rows || []).map((r) => ({
         id: r.video_id, title: r.title, channel: r.channel, thumbnail: r.thumbnail,
+        downloadUrl: r.download_url || null,
       })),
     });
   } catch (e) {
@@ -234,13 +239,42 @@ app.get("/api/library", async (req, res) => {
   }
 });
 
+function validDownloadUrl(url) {
+  if (!url) return "";
+  if (typeof url !== "string" || url.length > 2048) return null;
+  if (!/^https?:\/\//i.test(url)) return null;
+  return url;
+}
+
 app.post("/api/library", async (req, res) => {
-  const { email, video_id, title, channel, thumbnail } = req.body || {};
+  const { email, video_id, title, channel, thumbnail, download_url } = req.body || {};
   if (!email || !video_id) return res.status(400).json({ error: "email and video_id are required" });
+  const dl = validDownloadUrl(download_url);
+  if (dl === null) return res.status(400).json({ error: "download_url must be an http(s) link" });
   try {
     await supabaseFetch("saved_tracks", "POST", {
       user_email: email, video_id, title: title || "", channel: channel || "", thumbnail: thumbnail || "",
+      download_url: dl,
     });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message });
+  }
+});
+
+// Attach (or replace) a direct audio file link for a saved track.
+// This is the user's own / licensed file — it never extracts a YouTube stream.
+app.patch("/api/library/download-url", async (req, res) => {
+  const { email, video_id, download_url } = req.body || {};
+  if (!email || !video_id) return res.status(400).json({ error: "email and video_id are required" });
+  const dl = validDownloadUrl(download_url);
+  if (dl === null) return res.status(400).json({ error: "download_url must be an http(s) link" });
+  try {
+    await supabaseFetch(
+      `saved_tracks?user_email=eq.${encodeURIComponent(email)}&video_id=eq.${encodeURIComponent(video_id)}`,
+      "PATCH",
+      { download_url: dl }
+    );
     res.json({ ok: true });
   } catch (e) {
     res.status(e.status || 500).json({ error: e.message });

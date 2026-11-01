@@ -19,22 +19,36 @@
   <nav class="sidebar">
     <button data-view="home" class="nav active">Home</button>
     <button data-view="library" class="nav">Library</button>
+    <button data-view="offline" class="nav">Offline</button>
     <p class="hint">No sample songs. Everything here comes from the YouTube Data API or your saved tracks in Supabase. Playback uses YouTube's privacy-enhanced embed — it reduces tracking, but YouTube may still show non-personalised ads on some videos; only YouTube Premium removes them guaranteed.</p>
+    <p class="hint"><b>Downloads:</b> Download goes to your Downloads folder (on mobile: Files &gt; Downloads). “Save to a folder…” lets you pick a path where your browser supports it (desktop Chrome). Downloaded copies also stay in Offline here and play without internet. YouTube songs themselves have no file to download — Download on one asks you to attach your own / licensed file link for it.</p>
   </nav>
   <main>
     <div id="notice" class="notice" hidden></div>
     <h2 id="sectionTitle">Trending music</h2>
+    <div id="addFileBox" class="add-file" hidden>
+      <b>Add your own audio file</b>
+      <form id="addFileForm">
+        <input id="fileTitle" placeholder="Song title" required>
+        <input id="fileChannel" placeholder="Artist">
+        <input id="fileUrl" placeholder="Direct audio link (MP3 etc., that you own or have rights to)" required>
+        <button type="submit">Add file track</button>
+      </form>
+    </div>
     <div id="grid" class="grid"></div>
     <p id="empty" class="empty" hidden>No results yet.</p>
   </main>
 </div>
 <footer class="player" id="player" hidden>
   <iframe id="playerFrame" allow="autoplay; encrypted-media" allowfullscreen></iframe>
+  <audio id="audioPlayer" controls hidden></audio>
   <div class="player-meta">
     <div id="nowTitle"></div>
     <div id="nowChannel"></div>
   </div>
   <button id="saveBtn">Save to Library</button>
+  <button id="downloadBtn">Download</button>
+  <button id="saveFolderBtn">Save to a folder…</button>
 </footer>
 <script src="/app.js"></script>
 </body>
