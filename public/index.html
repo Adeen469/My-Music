@@ -1,165 +1,1288 @@
-<!doctype html>
-<html lang="en">
+<!DOCTYPE html>
+<html lang="en" class="dark">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>My Music</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/styles.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>My Music</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Google Fonts: Roboto & Material Symbols -->
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
+  
+  <style>
+    :root {
+      --bg-base: #030303;
+      --bg-elevated: #212121;
+      --yt-red: #FF0000;
+    }
+    body {
+      font-family: 'Roboto', sans-serif;
+      background-color: var(--bg-base);
+      color: #ffffff;
+      overflow: hidden;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .material-symbols-outlined {
+      font-variation-settings: 'FILL' 0, 'wght' 300, 'GRAD' 0, 'opsz' 24;
+    }
+    .material-symbols-outlined.filled {
+      font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+    }
+    /* Custom Scrollbars */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.2);
+      border-radius: 3px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(255, 255, 255, 0.35);
+    }
+    .no-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+    .no-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+
+    /* YouTube Music Top Progress Scrubber */
+    .yt-scrubber {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 100%;
+      height: 3px;
+      background: rgba(255, 255, 255, 0.2);
+      outline: none;
+      transition: height 0.12s ease;
+      cursor: pointer;
+    }
+    .player-bar:hover .yt-scrubber,
+    .yt-scrubber:hover {
+      height: 5px;
+    }
+    .yt-scrubber::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 13px;
+      height: 13px;
+      border-radius: 50%;
+      background: #FF0000;
+      cursor: pointer;
+      transform: scale(0);
+      transition: transform 0.12s ease;
+    }
+    .player-bar:hover .yt-scrubber::-webkit-slider-thumb,
+    .yt-scrubber:hover::-webkit-slider-thumb,
+    .yt-scrubber:active::-webkit-slider-thumb {
+      transform: scale(1);
+    }
+
+    /* Volume Slider */
+    .vol-slider {
+      -webkit-appearance: none;
+      appearance: none;
+      height: 3px;
+      background: rgba(255, 255, 255, 0.3);
+      border-radius: 2px;
+      outline: none;
+      cursor: pointer;
+    }
+    .vol-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: #ffffff;
+      cursor: pointer;
+    }
+
+    /* Dynamic Ambient Background */
+    #ambient-bg {
+      background: radial-gradient(circle at 25% 0%, rgba(185, 28, 28, 0.22) 0%, rgba(17, 24, 39, 0.15) 45%, rgba(3, 3, 3, 1) 80%);
+      transition: background 1.2s ease;
+    }
+  </style>
 </head>
-<body>
-<!-- Top navigation: 56px, sticky -->
-<header class="topbar">
-  <button id="menuBtn" class="icon-btn" aria-label="Menu">☰</button>
-  <a class="logo" href="#" id="logoLink"><span class="logo-play">▶</span><span class="logo-text">My&nbsp;Music</span></a>
-  <form id="searchForm" class="search" role="search">
-    <input id="searchInput" type="search" placeholder="Search songs, artists, albums" autocomplete="off" aria-label="Search">
-    <button type="button" id="micBtn" class="icon-btn" aria-label="Voice search" title="Voice search">🎤</button>
-    <button type="submit" aria-label="Search">🔍</button>
-    <div id="suggestBox" class="suggest" hidden></div>
-  </form>
-  <div class="top-right">
-    <button id="castBtn" class="icon-btn" aria-label="Cast" title="Cast (not available in this web app)">📺</button>
-    <button id="settingsBtn" class="icon-btn" aria-label="Settings" title="Settings">⚙️</button>
-    <div id="authArea" class="auth"></div>
-  </div>
-</header>
+<body class="h-[100dvh] w-screen flex flex-col">
 
-<div class="layout">
-  <!-- Sidebar: 240px desktop, 72px tablet, bottom nav on mobile -->
-  <nav class="sidebar" id="sidebar">
-    <button data-view="home" class="nav active"><span class="nav-icon">🏠</span><span class="nav-label">Home</span></button>
-    <button data-view="explore" class="nav"><span class="nav-icon">🧭</span><span class="nav-label">Explore</span></button>
-    <button data-view="library" class="nav"><span class="nav-icon">📚</span><span class="nav-label">Library</span></button>
-    <button data-view="offline" class="nav"><span class="nav-icon">⬇️</span><span class="nav-label">Offline</span></button>
-    <div class="side-section">
-      <h3>Your Mixes</h3>
-      <div id="mixList"></div>
+  <!-- Native HTML5 Audio Element for Backend Streams -->
+  <audio id="audio-engine" preload="metadata"></audio>
+
+  <!-- Ambient Top Glow -->
+  <div id="ambient-bg" class="fixed inset-0 pointer-events-none z-0"></div>
+
+  <!-- Mobile Sidebar Backdrop -->
+  <div id="sidebar-backdrop" onclick="closeMobileSidebar()" class="fixed inset-0 bg-black/60 backdrop-blur-xs z-40 hidden md:hidden"></div>
+
+  <!-- ================= TOP NAVBAR ================= -->
+  <header id="top-nav" class="h-14 sm:h-16 px-3 sm:px-4 flex items-center justify-between z-30 flex-shrink-0 transition-colors duration-200 border-b border-transparent relative">
+    
+    <!-- Left: Hamburger & Brand Logo -->
+    <div class="flex items-center gap-2 sm:gap-4">
+      <button id="menu-btn" class="p-2 rounded-full hover:bg-white/10 transition flex items-center justify-center" title="Menu">
+        <span class="material-symbols-outlined text-2xl">menu</span>
+      </button>
+      <a href="#" onclick="switchView('home'); return false;" class="flex items-center gap-2">
+        <div class="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-[#FF0000] flex items-center justify-center relative shadow-md flex-shrink-0">
+          <div class="w-3.5 h-3.5 sm:w-4 sm:h-4 rounded-full border border-white/80 flex items-center justify-center">
+            <div class="w-0 h-0 border-t-[3px] sm:border-t-[4px] border-t-transparent border-l-[5px] sm:border-l-[6px] border-l-white border-b-[3px] sm:border-b-[4px] border-b-transparent ml-0.5"></div>
+          </div>
+        </div>
+        <span class="text-lg sm:text-xl font-bold tracking-tight whitespace-nowrap">My Music</span>
+      </a>
     </div>
-    <div class="side-section">
-      <h3>Playlists</h3>
-      <div id="playlistList"><p class="hint">Saved tracks appear here as a playlist.</p></div>
+
+    <!-- Center: Desktop/Tablet Search Box -->
+    <div class="hidden sm:flex flex-1 max-w-[480px] mx-4">
+      <div class="relative flex items-center w-full h-10 rounded-lg bg-[#212121]/90 border border-white/15 focus-within:bg-[#121212] focus-within:border-white/30 transition px-3.5 shadow-inner">
+        <span class="material-symbols-outlined text-zinc-400 mr-3 text-xl">search</span>
+        <input 
+          id="search-input" 
+          type="text" 
+          placeholder="Search songs, albums, artists" 
+          class="bg-transparent w-full text-sm text-white placeholder-zinc-400 focus:outline-none"
+        />
+        <button id="clear-search" class="hidden text-zinc-400 hover:text-white flex items-center">
+          <span class="material-symbols-outlined text-lg">close</span>
+        </button>
+      </div>
     </div>
-    <p class="hint">No sample songs. Everything comes from the YouTube Data API, your saved tracks in Supabase, or files you add yourself. Playback uses YouTube's privacy-enhanced embed — ads can still appear on monetised videos; only YouTube Premium removes them guaranteed.</p>
-    <p class="hint"><b>Downloads:</b> Download goes to Downloads (mobile: Files &gt; Downloads). “Save to a folder…” picks a path where your browser supports it. Downloaded copies also stay in Offline and play without internet. YouTube songs have no file to download — Download on one asks you to attach your own / licensed file link.</p>
-  </nav>
 
-  <main>
-    <div id="notice" class="notice" hidden></div>
+    <!-- Mobile Full-Width Search Overlay -->
+    <div id="mobile-search-bar" class="hidden sm:hidden absolute inset-0 bg-[#121212] px-3 flex items-center gap-2 z-50 border-b border-white/10">
+      <button onclick="toggleMobileSearch(false)" class="p-2 text-zinc-300 hover:text-white flex items-center">
+        <span class="material-symbols-outlined">arrow_back</span>
+      </button>
+      <input 
+        id="mobile-search-input" 
+        type="text" 
+        placeholder="Search songs, albums, artists..." 
+        class="bg-transparent flex-1 text-sm text-white placeholder-zinc-400 focus:outline-none"
+      />
+      <button id="mobile-clear-search" class="hidden p-2 text-zinc-400 hover:text-white flex items-center">
+        <span class="material-symbols-outlined text-lg">close</span>
+      </button>
+    </div>
 
-    <!-- Home / Explore view -->
-    <section id="homeView">
-      <div class="hero" id="hero" hidden>
-        <img id="heroArt" alt="">
-        <div class="hero-overlay"></div>
-        <div class="hero-text">
-          <h1 id="heroTitle"></h1>
-          <p id="heroSub"></p>
-          <div class="hero-actions">
-            <button id="heroPlay" class="btn-white">▶ Play</button>
-            <button id="heroShuffle" class="btn-outline">🔀 Shuffle</button>
+    <!-- Right: Search Toggle (Mobile), Cast, Profile -->
+    <div class="flex items-center gap-1 sm:gap-2">
+      <button onclick="toggleMobileSearch(true)" class="sm:hidden p-2 rounded-full hover:bg-white/10 transition text-white/90 flex items-center justify-center" title="Search">
+        <span class="material-symbols-outlined text-xl">search</span>
+      </button>
+      <button onclick="emitEvent('onCastClick')" class="p-2 rounded-full hover:bg-white/10 transition text-white/90 flex items-center justify-center" title="Cast">
+        <span class="material-symbols-outlined text-xl">cast</span>
+      </button>
+      <button onclick="emitEvent('onProfileClick')" id="user-avatar" class="ml-1 w-8 h-8 rounded-full bg-zinc-800 border border-white/15 text-white font-bold text-xs flex items-center justify-center shadow hover:bg-zinc-700 transition">
+        <span class="material-symbols-outlined text-lg">person</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- ================= MAIN WORKSPACE ================= -->
+  <div class="flex flex-1 overflow-hidden relative z-10">
+    
+    <!-- LEFT SIDEBAR (Slide-over drawer on mobile, collapsible rail on desktop) -->
+    <aside id="sidebar" class="fixed md:static inset-y-0 left-0 w-64 md:w-60 -translate-x-full md:translate-x-0 flex-shrink-0 flex flex-col justify-between py-3 px-3 select-none transition-all duration-200 overflow-y-auto no-scrollbar border-r border-white/5 bg-[#030303] md:bg-[#030303]/60 backdrop-blur-md z-50 md:z-20">
+      <div>
+        <!-- Mobile Drawer Header -->
+        <div class="flex md:hidden items-center justify-between px-2 pb-4 mb-2 border-b border-white/10">
+          <span class="font-bold text-lg">My Music</span>
+          <button onclick="closeMobileSidebar()" class="p-1.5 rounded-full hover:bg-white/10 flex items-center">
+            <span class="material-symbols-outlined">close</span>
+          </button>
+        </div>
+
+        <!-- Primary Navigation -->
+        <nav id="nav-links" class="space-y-1">
+          <button data-nav="home" onclick="switchView('home')" class="nav-btn w-full flex items-center gap-5 px-3 py-2.5 rounded-lg bg-white/10 text-white font-medium text-sm transition">
+            <span class="material-symbols-outlined filled">home</span>
+            <span class="nav-label">Home</span>
+          </button>
+          <button data-nav="explore" onclick="switchView('explore')" class="nav-btn w-full flex items-center gap-5 px-3 py-2.5 rounded-lg hover:bg-white/5 text-zinc-300 font-medium text-sm transition">
+            <span class="material-symbols-outlined">explore</span>
+            <span class="nav-label">Explore</span>
+          </button>
+          <button data-nav="library" onclick="switchView('library')" class="nav-btn w-full flex items-center gap-5 px-3 py-2.5 rounded-lg hover:bg-white/5 text-zinc-300 font-medium text-sm transition">
+            <span class="material-symbols-outlined">library_music</span>
+            <span class="nav-label">Library</span>
+          </button>
+        </nav>
+
+        <hr class="sidebar-extra my-4 border-white/10 mx-2" />
+
+        <!-- New Playlist Action & Saved Playlists -->
+        <div class="sidebar-extra px-1">
+          <button onclick="handleCreatePlaylist()" class="w-full py-2 px-4 rounded-full bg-white/10 hover:bg-white/20 text-white font-medium text-sm flex items-center justify-center gap-2 transition mb-4">
+            <span class="material-symbols-outlined text-xl">add</span>
+            <span>New playlist</span>
+          </button>
+
+          <div id="playlist-list" class="space-y-1">
+            <!-- Populated dynamically by Backend API -->
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- MAIN CONTENT SCROLL CONTAINER -->
+    <main id="main-scroll" class="flex-1 overflow-y-auto px-4 sm:px-8 lg:px-14 pt-3 sm:pt-4 pb-36 md:pb-28 scroll-smooth">
+      
+      <!-- Mood / Category Filter Chips -->
+      <div id="mood-chips" class="flex items-center gap-2 sm:gap-3 overflow-x-auto no-scrollbar pb-4 sm:pb-6 pt-1 sticky top-0 z-20 bg-gradient-to-b from-[#030303] via-[#030303]/80 to-transparent">
+        <!-- Populated dynamically by Backend API -->
+      </div>
+
+      <!-- Dynamic Content Container -->
+      <div id="content-area" class="space-y-10 sm:space-y-12 max-w-[1400px]">
+        <!-- Populated dynamically by Backend API -->
+      </div>
+
+    </main>
+
+    <!-- ================= UP NEXT / PLAYER DRAWER OVERLAY ================= -->
+    <div id="player-drawer" class="fixed inset-x-0 top-14 sm:top-16 bottom-[112px] md:bottom-[72px] bg-[#030303] z-30 transform translate-y-full transition-transform duration-300 ease-in-out flex flex-col lg:flex-row px-4 sm:px-8 lg:px-16 py-4 sm:py-8 gap-6 lg:gap-10 overflow-y-auto lg:overflow-hidden">
+      
+      <!-- Left Side: Large Album Art / Song / Video -->
+      <div class="flex-1 flex flex-col items-center justify-center relative min-h-[200px] sm:min-h-[280px]">
+        <!-- Song / Video Toggle Switch -->
+        <div class="mb-4 sm:mb-6 flex items-center bg-[#212121] p-1 rounded-full border border-white/10">
+          <button id="mode-song-btn" onclick="toggleMediaMode('song')" class="px-4 sm:px-5 py-1 rounded-full text-xs font-medium bg-white/15 text-white transition">Song</button>
+          <button id="mode-video-btn" onclick="toggleMediaMode('video')" class="px-4 sm:px-5 py-1 rounded-full text-xs font-medium text-zinc-400 hover:text-white transition">Video</button>
+        </div>
+
+        <!-- Cover Art Container -->
+        <div id="drawer-art-wrap" class="relative w-48 h-48 sm:w-72 sm:h-72 lg:w-[400px] lg:h-[400px] rounded-lg overflow-hidden shadow-2xl border border-white/10 bg-zinc-900 flex items-center justify-center">
+          <img id="drawer-art" src="" alt="" class="hidden w-full h-full object-cover" />
+          <div id="drawer-art-placeholder" class="flex flex-col items-center justify-center text-zinc-600">
+            <span class="material-symbols-outlined text-5xl sm:text-6xl">music_note</span>
+          </div>
+          <!-- Video Container (For Backend Video Streams) -->
+          <div id="video-visualizer" class="hidden absolute inset-0 bg-black flex flex-col items-center justify-center p-6 text-center">
+            <video id="video-engine" class="w-full h-full object-contain hidden"></video>
+            <span id="video-placeholder-text" class="text-xs uppercase tracking-widest text-zinc-500">No Video Stream Attached</span>
           </div>
         </div>
       </div>
 
-      <section class="carousel-section">
-        <div class="section-head"><h2 id="trendingTitle">Trending music</h2><button class="see-all" id="trendingSeeAll">See All &gt;</button></div>
-        <div class="carousel-wrap">
-          <button class="car-arrow left" data-target="trendingRow" aria-label="Scroll left">‹</button>
-          <div class="carousel" id="trendingRow"></div>
-          <button class="car-arrow right" data-target="trendingRow" aria-label="Scroll right">›</button>
+      <!-- Right Side: Up Next / Lyrics / Related Tabs -->
+      <div class="w-full lg:w-[460px] flex flex-col flex-1 lg:h-full overflow-hidden min-h-[260px]">
+        <!-- Tabs Header -->
+        <div class="flex border-b border-white/15 text-xs sm:text-sm font-medium tracking-wider uppercase text-zinc-400 flex-shrink-0">
+          <button onclick="switchDrawerTab('upnext')" id="tab-upnext" class="flex-1 py-2.5 sm:py-3 text-center border-b-2 border-white text-white transition">Up Next</button>
+          <button onclick="switchDrawerTab('lyrics')" id="tab-lyrics" class="flex-1 py-2.5 sm:py-3 text-center border-b-2 border-transparent hover:text-white transition">Lyrics</button>
+          <button onclick="switchDrawerTab('related')" id="tab-related" class="flex-1 py-2.5 sm:py-3 text-center border-b-2 border-transparent hover:text-white transition">Related</button>
         </div>
-      </section>
 
-      <section class="carousel-section">
-        <div class="section-head"><h2>Artists</h2></div>
-        <div class="carousel-wrap">
-          <button class="car-arrow left" data-target="artistRow" aria-label="Scroll left">‹</button>
-          <div class="carousel" id="artistRow"></div>
-          <button class="car-arrow right" data-target="artistRow" aria-label="Scroll right">›</button>
+        <!-- Sub-header info -->
+        <div class="flex items-center justify-between py-2.5 px-1 text-xs text-zinc-400 border-b border-white/5 flex-shrink-0">
+          <div>Queue (<span id="queue-count" class="text-white font-medium">0</span>)</div>
+          <button onclick="shuffleQueue()" class="px-3 py-1 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center gap-1 transition">
+            <span class="material-symbols-outlined text-sm">shuffle</span> Shuffle
+          </button>
         </div>
-      </section>
 
-      <section class="song-table-section">
-        <div class="section-head"><h2>Top songs</h2></div>
-        <table class="song-table" aria-label="Top songs">
-          <thead><tr><th>#</th><th>Title</th><th>Album</th><th>Duration</th><th></th></tr></thead>
-          <tbody id="songTableBody"></tbody>
-        </table>
-        <p id="empty" class="empty" hidden>No results yet.</p>
-      </section>
-    </section>
-
-    <!-- Library / Offline / Search results view -->
-    <section id="listView" hidden>
-      <h2 id="sectionTitle">Library</h2>
-      <div id="addFileBox" class="add-file" hidden>
-        <b>Add your own audio file</b>
-        <form id="addFileForm">
-          <input id="fileTitle" placeholder="Song title" required>
-          <input id="fileChannel" placeholder="Artist">
-          <input id="fileUrl" placeholder="Direct audio link (MP3 etc., that you own or have rights to)" required>
-          <button type="submit">Add file track</button>
-        </form>
+        <!-- Tab Content Area -->
+        <div id="drawer-tab-content" class="flex-1 overflow-y-auto pr-1 py-2 space-y-1">
+          <!-- Populated dynamically -->
+        </div>
       </div>
-      <div id="grid" class="grid"></div>
-      <p id="listEmpty" class="empty" hidden>No results yet.</p>
-    </section>
-  </main>
-</div>
 
-<!-- Mini player / Now Playing bar: 72px, fixed bottom -->
-<footer class="player" id="player" hidden>
-  <div class="player-left">
-    <img id="playerArt" src="" alt="">
-    <div class="player-meta">
-      <div id="nowTitle"></div>
-      <div id="nowChannel"></div>
     </div>
-    <span id="playingDot" class="playing-dot" aria-label="Now playing">▮▮▮</span>
   </div>
-  <div class="player-center">
-    <button id="shuffleBtn" class="icon-btn" aria-label="Shuffle">🔀</button>
-    <button id="prevBtn" class="icon-btn" aria-label="Previous">⏮</button>
-    <button id="playPauseBtn" class="play-btn" aria-label="Play or pause">▶</button>
-    <button id="nextBtn" class="icon-btn" aria-label="Next">⏭</button>
-    <button id="repeatBtn" class="icon-btn" aria-label="Repeat">🔁</button>
-  </div>
-  <div class="player-right">
-    <button id="lyricsBtn" class="icon-btn" aria-label="Lyrics">📝</button>
-    <button id="queueBtn" class="icon-btn" aria-label="Queue">☰</button>
-    <input id="volumeSlider" type="range" min="0" max="100" value="80" aria-label="Volume">
-    <button id="saveBtn">Save</button>
-    <button id="downloadBtn">Download</button>
-    <button id="saveFolderBtn">Save to a folder…</button>
-    <button id="expandBtn" class="icon-btn" aria-label="Expand player">⤢</button>
-  </div>
-  <div class="player-media" hidden>
-    <iframe id="playerFrame" allow="autoplay; encrypted-media" allowfullscreen></iframe>
-    <audio id="audioPlayer" controls></audio>
-  </div>
-</footer>
 
-<!-- Expanded player: full screen -->
-<div class="expanded" id="expanded" hidden>
-  <button id="collapseBtn" class="icon-btn">✕ Close</button>
-  <img id="expArt" src="" alt="">
-  <h2 id="expTitle"></h2>
-  <p id="expChannel"></p>
-  <div class="exp-lyrics" id="expLyrics">Lyrics are not available for this track in this app — no lyrics source is connected, so none are faked here.</div>
-  <h3>Up next (queue)</h3>
-  <div id="expQueue"></div>
-</div>
+  <!-- ================= BOTTOM PLAYER BAR ================= -->
+  <footer class="player-bar h-14 md:h-[72px] bg-[#212121] border-t border-white/5 relative z-40 flex items-center justify-between px-2 sm:px-4 select-none flex-shrink-0">
+    
+    <!-- Top Edge Progress Scrubber -->
+    <div class="absolute -top-[7px] left-0 right-0 flex items-center">
+      <input id="progress-scrubber" type="range" min="0" max="100" value="0" class="yt-scrubber z-50" disabled />
+      <div id="progress-fill" class="pointer-events-none absolute left-0 top-[6px] h-[3px] bg-[#FF0000] transition-all duration-100" style="width: 0%;"></div>
+    </div>
 
-<!-- Mobile bottom nav: <640px -->
-<nav class="bottom-nav">
-  <button data-view="home" class="nav active">🏠<span>Home</span></button>
-  <button data-view="explore" class="nav">🧭<span>Explore</span></button>
-  <button data-view="library" class="nav">📚<span>Library</span></button>
-  <button data-view="offline" class="nav">⬇️<span>Offline</span></button>
-</nav>
+    <!-- Left: Transport Controls & Time -->
+    <div class="flex items-center gap-1 sm:gap-3 md:w-1/4 md:min-w-[180px]">
+      <button onclick="prevTrack()" class="hidden sm:flex p-2 rounded-full hover:bg-white/10 transition items-center justify-center" title="Previous">
+        <span class="material-symbols-outlined text-2xl filled">skip_previous</span>
+      </button>
+      <button id="play-pause-btn" onclick="togglePlay()" class="w-9 h-9 sm:w-10 sm:h-10 rounded-full hover:bg-white/10 transition flex items-center justify-center" title="Play/Pause">
+        <span id="play-pause-icon" class="material-symbols-outlined text-3xl sm:text-4xl filled">play_arrow</span>
+      </button>
+      <button onclick="nextTrack()" class="p-1.5 sm:p-2 rounded-full hover:bg-white/10 transition flex items-center justify-center" title="Next">
+        <span class="material-symbols-outlined text-2xl filled">skip_next</span>
+      </button>
+      <span id="time-display" class="text-xs text-zinc-400 hidden lg:inline-block ml-1 tabular-nums">0:00 / 0:00</span>
+    </div>
 
-<script src="/main.js"></script>
+    <!-- Center: Active Track Info & Like/Dislike -->
+    <div class="flex items-center justify-start md:justify-center gap-2.5 sm:gap-4 flex-1 max-w-xl overflow-hidden mx-2">
+      <div onclick="toggleDrawer()" class="w-9 h-9 sm:w-10 sm:h-10 rounded bg-zinc-800 flex items-center justify-center cursor-pointer flex-shrink-0 border border-white/10 overflow-hidden">
+        <img id="player-art" src="" alt="" class="hidden w-full h-full object-cover" />
+        <span id="player-art-placeholder" class="material-symbols-outlined text-zinc-500 text-lg">music_note</span>
+      </div>
+      <div class="overflow-hidden cursor-pointer flex-1 md:flex-initial" onclick="toggleDrawer()">
+        <div id="player-title" class="text-xs sm:text-sm font-medium text-white truncate">No track selected</div>
+        <div id="player-artist" class="text-[11px] sm:text-xs text-zinc-400 truncate">Connect backend to load music</div>
+      </div>
+      <!-- Dislike / Like -->
+      <div class="hidden sm:flex items-center gap-0.5 ml-1 flex-shrink-0">
+        <button id="dislike-btn" onclick="toggleDislike()" class="p-1.5 sm:p-2 rounded-full hover:bg-white/10 text-zinc-300 transition flex items-center justify-center" title="Dislike">
+          <span class="material-symbols-outlined text-lg sm:text-xl">thumb_down</span>
+        </button>
+        <button id="like-btn" onclick="toggleLikeCurrent()" class="p-1.5 sm:p-2 rounded-full hover:bg-white/10 text-zinc-300 transition flex items-center justify-center" title="Like">
+          <span class="material-symbols-outlined text-lg sm:text-xl">thumb_up</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Right: Volume, Repeat, Shuffle & Drawer Toggle -->
+    <div class="flex items-center justify-end gap-1 sm:gap-2 md:w-1/4 md:min-w-[140px]">
+      <div class="hidden lg:flex items-center gap-2 group mr-2">
+        <input id="volume-slider" type="range" min="0" max="100" value="80" class="vol-slider w-20 opacity-70 group-hover:opacity-100 transition" />
+        <button id="mute-btn" onclick="toggleMute()" class="p-2 rounded-full hover:bg-white/10 text-zinc-300 flex items-center justify-center" title="Mute">
+          <span id="volume-icon" class="material-symbols-outlined text-xl">volume_up</span>
+        </button>
+      </div>
+
+      <button id="repeat-btn" onclick="toggleRepeat()" class="p-2 rounded-full hover:bg-white/10 text-zinc-400 hidden md:flex items-center justify-center transition" title="Repeat">
+        <span class="material-symbols-outlined text-xl">repeat</span>
+      </button>
+      <button id="shuffle-btn" onclick="shuffleQueue()" class="p-2 rounded-full hover:bg-white/10 text-zinc-400 hidden md:flex items-center justify-center transition" title="Shuffle">
+        <span class="material-symbols-outlined text-xl">shuffle</span>
+      </button>
+      <button id="drawer-toggle-btn" onclick="toggleDrawer()" class="p-1.5 sm:p-2 rounded-full hover:bg-white/10 text-white flex items-center justify-center transition" title="Toggle Player Drawer">
+        <span id="drawer-caret" class="material-symbols-outlined text-2xl transition-transform duration-300">arrow_drop_up</span>
+      </button>
+    </div>
+
+  </footer>
+
+  <!-- ================= MOBILE BOTTOM NAVIGATION BAR ================= -->
+  <nav class="md:hidden h-14 bg-[#121212] border-t border-white/10 flex items-center justify-around z-40 flex-shrink-0 select-none">
+    <button data-mobile-nav="home" onclick="switchView('home')" class="mobile-nav-btn flex flex-col items-center justify-center py-1 text-white flex-1">
+      <span class="material-symbols-outlined filled text-xl">home</span>
+      <span class="text-[10px] mt-0.5 font-medium">Home</span>
+    </button>
+    <button data-mobile-nav="explore" onclick="switchView('explore')" class="mobile-nav-btn flex flex-col items-center justify-center py-1 text-zinc-400 flex-1">
+      <span class="material-symbols-outlined text-xl">explore</span>
+      <span class="text-[10px] mt-0.5 font-medium">Explore</span>
+    </button>
+    <button data-mobile-nav="library" onclick="switchView('library')" class="mobile-nav-btn flex flex-col items-center justify-center py-1 text-zinc-400 flex-1">
+      <span class="material-symbols-outlined text-xl">library_music</span>
+      <span class="text-[10px] mt-0.5 font-medium">Library</span>
+    </button>
+  </nav>
+
+  <!-- Toast Notification -->
+  <div id="toast" class="fixed bottom-32 md:bottom-24 left-4 sm:left-6 bg-white text-black px-4 py-2.5 rounded shadow-xl text-xs sm:text-sm font-medium z-50 opacity-0 pointer-events-none transition-opacity duration-300">
+    Notification
+  </div>
+
+  <!-- ================= APPLICATION & BACKEND BRIDGE JAVASCRIPT ================= -->
+  <script>
+    // --- EMPTY APPLICATION STATE (Populated via window.MyMusicAPI) ---
+    let state = {
+      tracks: [],
+      albums: [],
+      artists: [],
+      playlists: [],
+      moods: [],
+      likedIds: new Set(),
+      dislikedIds: new Set(),
+      isLoading: false
+    };
+
+    let currentView = 'home';
+    let selectedMood = 'All';
+    let searchQuery = '';
+    let queue = [];
+    let currentIndex = -1;
+    let isPlaying = false;
+    let isMuted = false;
+    let volume = 0.8;
+    let isRepeat = false;
+    let drawerOpen = false;
+    let activeDrawerTab = 'upnext';
+    let sidebarCollapsed = false;
+
+    const audio = document.getElementById('audio-engine');
+
+    // --- BACKEND EVENT HOOKS ---
+    const eventCallbacks = {};
+    function emitEvent(eventName, payload) {
+      if (typeof eventCallbacks[eventName] === 'function') {
+        eventCallbacks[eventName](payload);
+      }
+    }
+
+    // --- PUBLIC API FOR YOUR BACKEND ---
+    window.MyMusicAPI = {
+      /**
+       * Populate or update the UI catalog from your backend API
+       */
+      setCatalog({ tracks = [], albums = [], artists = [], playlists = [], moods = [], likedIds = [] } = {}) {
+        state.tracks = tracks;
+        state.albums = albums;
+        state.artists = artists;
+        state.playlists = playlists;
+        state.moods = moods;
+        state.likedIds = new Set(likedIds);
+        queue = [...tracks];
+
+        renderSidebarPlaylists();
+        renderMoodChips();
+        renderContent();
+        renderDrawerContent();
+      },
+
+      /**
+       * Toggle skeleton loading state while fetching from backend
+       */
+      setLoading(loading) {
+        state.isLoading = Boolean(loading);
+        renderContent();
+      },
+
+      /**
+       * Programmatically load and play a specific track object
+       */
+      playTrack(trackObj) {
+        if (!trackObj) return;
+        const existingIdx = queue.findIndex(t => String(t.id) === String(trackObj.id));
+        if (existingIdx === -1) {
+          queue.unshift(trackObj);
+          currentIndex = 0;
+        } else {
+          currentIndex = existingIdx;
+        }
+        startPlayback(queue[currentIndex]);
+      },
+
+      /**
+       * Register event listeners for backend actions
+       * Events: 'onSearch', 'onTrackPlay', 'onLikeToggle', 'onDislikeToggle', 'onCreatePlaylist', 'onPlaylistSelect', 'onMoodSelect', 'onCastClick', 'onProfileClick'
+       */
+      on(eventName, callback) {
+        eventCallbacks[eventName] = callback;
+      },
+
+      /**
+       * Trigger a toast message
+       */
+      notify(message) {
+        showToast(message);
+      }
+    };
+
+    // --- INITIALIZATION ---
+    window.addEventListener('DOMContentLoaded', () => {
+      renderSidebarPlaylists();
+      renderMoodChips();
+      renderContent();
+      renderDrawerContent();
+
+      // Scroll listener for navbar background
+      const mainScroll = document.getElementById('main-scroll');
+      const topNav = document.getElementById('top-nav');
+      mainScroll.addEventListener('scroll', () => {
+        if (mainScroll.scrollTop > 12) {
+          topNav.classList.add('bg-[#030303]', 'border-white/10');
+          topNav.classList.remove('border-transparent');
+        } else {
+          topNav.classList.remove('bg-[#030303]', 'border-white/10');
+          topNav.classList.add('border-transparent');
+        }
+      });
+
+      // Responsive Menu Button (Drawer on mobile, collapse rail on desktop)
+      document.getElementById('menu-btn').addEventListener('click', () => {
+        if (window.innerWidth < 768) {
+          openMobileSidebar();
+        } else {
+          toggleDesktopSidebar();
+        }
+      });
+
+      // Bind Desktop & Mobile Search Inputs
+      setupSearchInput('search-input', 'clear-search');
+      setupSearchInput('mobile-search-input', 'mobile-clear-search');
+
+      // Audio Element Listeners
+      audio.volume = volume;
+      audio.addEventListener('timeupdate', updateProgressUI);
+      audio.addEventListener('loadedmetadata', updateProgressUI);
+      audio.addEventListener('ended', () => {
+        if (isRepeat) {
+          audio.currentTime = 0;
+          audio.play().catch(() => {});
+        } else {
+          nextTrack();
+        }
+      });
+
+      // Scrubber input
+      const scrubber = document.getElementById('progress-scrubber');
+      scrubber.addEventListener('input', (e) => {
+        const track = queue[currentIndex];
+        const duration = audio.duration || track?.duration || 0;
+        if (duration > 0) {
+          audio.currentTime = (e.target.value / 100) * duration;
+          updateProgressUI();
+        }
+      });
+
+      // Volume slider
+      const volSlider = document.getElementById('volume-slider');
+      volSlider.addEventListener('input', (e) => {
+        volume = e.target.value / 100;
+        isMuted = volume === 0;
+        audio.volume = isMuted ? 0 : volume;
+        updateVolumeIcon();
+      });
+
+      // Spacebar play/pause shortcut
+      window.addEventListener('keydown', (e) => {
+        if (e.code === 'Space' && document.activeElement.tagName !== 'INPUT') {
+          e.preventDefault();
+          togglePlay();
+        }
+      });
+    });
+
+    function setupSearchInput(inputId, clearId) {
+      const input = document.getElementById(inputId);
+      const clearBtn = document.getElementById(clearId);
+      input.addEventListener('input', (e) => {
+        searchQuery = e.target.value.trim().toLowerCase();
+        clearBtn.classList.toggle('hidden', !searchQuery);
+        emitEvent('onSearch', searchQuery);
+        renderContent();
+      });
+      clearBtn.addEventListener('click', () => {
+        input.value = '';
+        searchQuery = '';
+        clearBtn.classList.add('hidden');
+        emitEvent('onSearch', '');
+        renderContent();
+      });
+    }
+
+    function toggleMobileSearch(show) {
+      const bar = document.getElementById('mobile-search-bar');
+      const input = document.getElementById('mobile-search-input');
+      bar.classList.toggle('hidden', !show);
+      if (show) input.focus();
+    }
+
+    // --- SIDEBAR & NAVIGATION ---
+    function openMobileSidebar() {
+      document.getElementById('sidebar').classList.remove('-translate-x-full');
+      document.getElementById('sidebar-backdrop').classList.remove('hidden');
+    }
+
+    function closeMobileSidebar() {
+      document.getElementById('sidebar').classList.add('-translate-x-full');
+      document.getElementById('sidebar-backdrop').classList.add('hidden');
+    }
+
+    function toggleDesktopSidebar() {
+      sidebarCollapsed = !sidebarCollapsed;
+      const sidebar = document.getElementById('sidebar');
+      const labels = sidebar.querySelectorAll('.nav-label');
+      const extras = sidebar.querySelectorAll('.sidebar-extra');
+      
+      if (sidebarCollapsed) {
+        sidebar.classList.remove('md:w-60');
+        sidebar.classList.add('md:w-[72px]');
+        labels.forEach(l => l.classList.add('md:hidden'));
+        extras.forEach(e => e.classList.add('md:hidden'));
+      } else {
+        sidebar.classList.add('md:w-60');
+        sidebar.classList.remove('md:w-[72px]');
+        labels.forEach(l => l.classList.remove('md:hidden'));
+        extras.forEach(e => e.classList.remove('md:hidden'));
+      }
+    }
+
+    function switchView(view) {
+      currentView = view;
+      closeMobileSidebar();
+
+      // Update Desktop Sidebar Buttons
+      document.querySelectorAll('.nav-btn').forEach(btn => {
+        const isTarget = btn.dataset.nav === view;
+        btn.classList.toggle('bg-white/10', isTarget);
+        btn.classList.toggle('text-white', isTarget);
+        btn.classList.toggle('text-zinc-300', !isTarget);
+        const icon = btn.querySelector('.material-symbols-outlined');
+        if (icon) icon.classList.toggle('filled', isTarget);
+      });
+
+      // Update Mobile Bottom Nav Buttons
+      document.querySelectorAll('.mobile-nav-btn').forEach(btn => {
+        const isTarget = btn.dataset.mobileNav === view;
+        btn.classList.toggle('text-white', isTarget);
+        btn.classList.toggle('text-zinc-400', !isTarget);
+        const icon = btn.querySelector('.material-symbols-outlined');
+        if (icon) icon.classList.toggle('filled', isTarget);
+      });
+
+      renderContent();
+    }
+
+    // --- UI RENDERING ---
+    function renderSidebarPlaylists() {
+      const container = document.getElementById('playlist-list');
+      if (!state.playlists.length) {
+        container.innerHTML = `<div class="px-3 py-4 text-xs text-zinc-500 text-center">No playlists loaded</div>`;
+        return;
+      }
+
+      container.innerHTML = state.playlists.map(pl => `
+        <button onclick="emitEvent('onPlaylistSelect', '${pl.id || pl.name}')" class="w-full flex items-center justify-between px-3 py-2 rounded-lg hover:bg-white/5 text-left group transition">
+          <div class="overflow-hidden">
+            <div class="text-sm font-medium text-white truncate">${escapeHtml(pl.name)}</div>
+            <div class="text-xs text-zinc-400 truncate">${escapeHtml(pl.sub || '')}</div>
+          </div>
+          <span class="material-symbols-outlined text-white opacity-0 group-hover:opacity-100 transition text-xl">play_circle</span>
+        </button>
+      `).join('');
+    }
+
+    function renderMoodChips() {
+      const container = document.getElementById('mood-chips');
+      if (!state.moods.length) {
+        container.innerHTML = '';
+        container.classList.add('hidden');
+        return;
+      }
+      container.classList.remove('hidden');
+      container.innerHTML = state.moods.map(mood => {
+        const active = selectedMood === mood;
+        return `
+          <button 
+            onclick="selectMood('${escapeHtml(mood)}')" 
+            class="px-3.5 py-1.5 rounded-lg text-xs sm:text-sm font-medium whitespace-nowrap transition border ${
+              active 
+                ? 'bg-white text-black border-white' 
+                : 'bg-white/10 text-white border-white/5 hover:bg-white/20'
+            }"
+          >
+            ${escapeHtml(mood)}
+          </button>
+        `;
+      }).join('');
+    }
+
+    function selectMood(mood) {
+      selectedMood = mood;
+      emitEvent('onMoodSelect', mood);
+      renderMoodChips();
+      renderContent();
+    }
+
+    function renderContent() {
+      const container = document.getElementById('content-area');
+
+      if (state.isLoading) {
+        container.innerHTML = renderSkeletonLoader();
+        return;
+      }
+
+      // Filter tracks by mood and search query
+      const filteredTracks = state.tracks.filter(t => {
+        const matchesMood = selectedMood === 'All' || !t.mood || t.mood === selectedMood;
+        const matchesSearch = !searchQuery || 
+          (t.title && t.title.toLowerCase().includes(searchQuery)) || 
+          (t.artist && t.artist.toLowerCase().includes(searchQuery)) ||
+          (t.album && t.album.toLowerCase().includes(searchQuery));
+        return matchesMood && matchesSearch;
+      });
+
+      if (currentView === 'explore') {
+        container.innerHTML = renderExploreView(filteredTracks);
+        return;
+      }
+
+      if (currentView === 'library') {
+        container.innerHTML = renderLibraryView();
+        return;
+      }
+
+      // Empty State when no backend data is loaded yet
+      if (!state.tracks.length && !state.albums.length && !state.artists.length) {
+        container.innerHTML = renderEmptyState(
+          'cloud_off',
+          'No catalog data connected',
+          'Call window.MyMusicAPI.setCatalog({ tracks, albums, artists }) from your backend service to populate the interface.'
+        );
+        return;
+      }
+
+      // HOME VIEW
+      container.innerHTML = `
+        ${state.albums.length ? `
+          <section>
+            <div class="flex items-end justify-between mb-4">
+              <div>
+                <h2 class="text-xl sm:text-2xl md:text-3xl font-bold tracking-tight">Featured Albums & Mixes</h2>
+              </div>
+            </div>
+            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4 sm:gap-5">
+              ${state.albums.map(album => `
+                <div onclick="handleAlbumClick('${album.id}', '${album.trackId || ''}')" class="group cursor-pointer">
+                  <div class="relative aspect-square rounded-md overflow-hidden mb-2 bg-zinc-900 shadow-lg">
+                    ${album.cover ? `<img src="${album.cover}" alt="${escapeHtml(album.title)}" class="w-full h-full object-cover group-hover:scale-105 transition duration-300" />` : `<div class="w-full h-full flex items-center justify-center"><span class="material-symbols-outlined text-4xl text-zinc-700">album</span></div>`}
+                    <div class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center">
+                      <div class="w-11 h-11 rounded-full bg-black/80 text-white flex items-center justify-center shadow-xl">
+                        <span class="material-symbols-outlined filled text-2xl">play_arrow</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="font-medium text-sm text-white truncate group-hover:underline">${escapeHtml(album.title)}</div>
+                  <div class="text-xs text-zinc-400 truncate mt-0.5">${escapeHtml(album.subtitle || '')}</div>
+                </div>
+              `).join('')}
+            </div>
+          </section>
+        ` : ''}
+
+        <section>
+          <div class="flex items-end justify-between mb-4">
+            <div>
+              <h2 class="text-xl sm:text-2xl md:text-3xl font-bold tracking-tight">Quick picks</h2>
+            </div>
+            ${filteredTracks.length ? `
+              <button onclick="shuffleQueue()" class="px-3.5 py-1.5 rounded-full border border-white/20 hover:bg-white/10 text-xs font-medium transition">Play all</button>
+            ` : ''}
+          </div>
+
+          ${!filteredTracks.length ? `
+            <div class="py-12 text-center text-sm text-zinc-500">No songs match the current filter.</div>
+          ` : `
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-8 gap-y-1.5">
+              ${filteredTracks.map(track => {
+                const isCurrent = queue[currentIndex]?.id === track.id;
+                const isLiked = state.likedIds.has(track.id);
+                return `
+                  <div onclick="playTrackById('${track.id}')" class="flex items-center justify-between p-2 rounded-md hover:bg-white/10 group cursor-pointer transition ${isCurrent ? 'bg-white/10' : ''}">
+                    <div class="flex items-center gap-3 overflow-hidden">
+                      <div class="relative w-12 h-12 rounded overflow-hidden flex-shrink-0 bg-zinc-800 flex items-center justify-center">
+                        ${track.cover ? `<img src="${track.cover}" class="w-full h-full object-cover" />` : `<span class="material-symbols-outlined text-zinc-500">music_note</span>`}
+                        <div class="absolute inset-0 bg-black/50 ${isCurrent ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'} flex items-center justify-center transition">
+                          <span class="material-symbols-outlined filled text-white text-2xl">${isCurrent && isPlaying ? 'equalizer' : 'play_arrow'}</span>
+                        </div>
+                      </div>
+                      <div class="overflow-hidden">
+                        <div class="text-sm font-medium text-white truncate">${escapeHtml(track.title)}</div>
+                        <div class="text-xs text-zinc-400 truncate">${escapeHtml(track.artist || '')}${track.plays ? ` • ${escapeHtml(track.plays)}` : ''}</div>
+                      </div>
+                    </div>
+                    <div class="flex items-center gap-1 sm:opacity-0 sm:group-hover:opacity-100 transition flex-shrink-0" onclick="event.stopPropagation()">
+                      <button onclick="toggleLikeById('${track.id}')" class="p-1.5 rounded-full hover:bg-white/10 text-zinc-300">
+                        <span class="material-symbols-outlined text-lg ${isLiked ? 'filled text-white' : ''}">thumb_up</span>
+                      </button>
+                      <button onclick="downloadTrackById('${track.id}')" class="p-1.5 rounded-full hover:bg-white/10 text-zinc-300" title="Download">
+                        <span class="material-symbols-outlined text-lg">download</span>
+                      </button>
+                    </div>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          `}
+        </section>
+
+        ${state.artists.length ? `
+          <section>
+            <div class="mb-4">
+              <h2 class="text-xl sm:text-2xl md:text-3xl font-bold tracking-tight">Artists</h2>
+            </div>
+            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-5">
+              ${state.artists.map(artist => `
+                <div onclick="emitEvent('onArtistSelect', '${artist.id || artist.name}')" class="flex flex-col items-center text-center group cursor-pointer">
+                  <div class="w-28 h-28 sm:w-36 sm:h-36 rounded-full overflow-hidden mb-3 shadow-lg border border-white/10 bg-zinc-900 flex items-center justify-center">
+                    ${artist.cover ? `<img src="${artist.cover}" class="w-full h-full object-cover group-hover:scale-105 transition duration-300" />` : `<span class="material-symbols-outlined text-4xl text-zinc-600">person</span>`}
+                  </div>
+                  <div class="font-medium text-sm text-white group-hover:underline">${escapeHtml(artist.name)}</div>
+                  <div class="text-xs text-zinc-400 mt-0.5">${escapeHtml(artist.subscribers || '')}</div>
+                </div>
+              `).join('')}
+            </div>
+          </section>
+        ` : ''}
+      `;
+    }
+
+    function renderExploreView(tracks) {
+      if (!tracks.length) {
+        return renderEmptyState('explore', 'Explore is empty', 'Populate tracks from your backend to display charts and new releases.');
+      }
+      return `
+        <section>
+          <h2 class="text-xl sm:text-2xl font-bold mb-4">Top Tracks</h2>
+          <div class="space-y-1">
+            ${tracks.map((track, idx) => `
+              <div onclick="playTrackById('${track.id}')" class="flex items-center justify-between p-2.5 rounded-md hover:bg-white/10 cursor-pointer group transition">
+                <div class="flex items-center gap-3 sm:gap-4 overflow-hidden">
+                  <span class="w-5 text-center font-bold text-zinc-400 text-sm">${idx + 1}</span>
+                  <div class="w-11 h-11 rounded overflow-hidden bg-zinc-800 flex-shrink-0 flex items-center justify-center">
+                    ${track.cover ? `<img src="${track.cover}" class="w-full h-full object-cover" />` : `<span class="material-symbols-outlined text-zinc-500">music_note</span>`}
+                  </div>
+                  <div class="overflow-hidden">
+                    <div class="text-sm font-medium text-white truncate">${escapeHtml(track.title)}</div>
+                    <div class="text-xs text-zinc-400 truncate">${escapeHtml(track.artist || '')}</div>
+                  </div>
+                </div>
+                <span class="text-xs text-zinc-400 ml-2">${formatTime(track.duration || 0)}</span>
+              </div>
+            `).join('')}
+          </div>
+        </section>
+      `;
+    }
+
+    function renderLibraryView() {
+      const likedTracks = state.tracks.filter(t => state.likedIds.has(t.id));
+      if (!likedTracks.length && !state.playlists.length) {
+        return renderEmptyState('library_music', 'Your Library is empty', 'Liked songs and user playlists from your backend will appear here.');
+      }
+      return `
+        <div class="space-y-8">
+          <h2 class="text-2xl sm:text-3xl font-bold">Your Library</h2>
+          <div>
+            <h3 class="text-base sm:text-lg font-medium text-zinc-300 mb-3">Liked Music (${likedTracks.length})</h3>
+            ${!likedTracks.length ? `<div class="text-sm text-zinc-500 py-6">No liked songs yet.</div>` : `
+              <div class="divide-y divide-white/5 border-t border-b border-white/10">
+                ${likedTracks.map(track => `
+                  <div onclick="playTrackById('${track.id}')" class="flex items-center justify-between py-2.5 px-2 hover:bg-white/5 cursor-pointer transition">
+                    <div class="flex items-center gap-3 sm:gap-4 overflow-hidden">
+                      <div class="w-10 h-10 rounded overflow-hidden bg-zinc-800 flex-shrink-0">
+                        ${track.cover ? `<img src="${track.cover}" class="w-full h-full object-cover" />` : ''}
+                      </div>
+                      <div class="overflow-hidden">
+                        <div class="text-sm font-medium text-white truncate">${escapeHtml(track.title)}</div>
+                        <div class="text-xs text-zinc-400 truncate">${escapeHtml(track.artist || '')}</div>
+                      </div>
+                    </div>
+                    <div class="flex items-center gap-3">
+                      <button onclick="event.stopPropagation(); toggleLikeById('${track.id}')" class="text-white">
+                        <span class="material-symbols-outlined filled text-lg">thumb_up</span>
+                      </button>
+                      <span class="text-xs text-zinc-400 w-10 text-right">${formatTime(track.duration || 0)}</span>
+                    </div>
+                  </div>
+                `).join('')}
+              </div>
+            `}
+          </div>
+        </div>
+      `;
+    }
+
+    function renderEmptyState(icon, title, subtitle) {
+      return `
+        <div class="flex flex-col items-center justify-center text-center py-20 px-4 border border-dashed border-white/10 rounded-xl bg-white/[0.01]">
+          <span class="material-symbols-outlined text-5xl text-zinc-600 mb-3">${icon}</span>
+          <h3 class="text-lg font-bold text-white mb-1">${title}</h3>
+          <p class="text-xs sm:text-sm text-zinc-400 max-w-md">${subtitle}</p>
+        </div>
+      `;
+    }
+
+    function renderSkeletonLoader() {
+      return `
+        <div class="space-y-10 animate-pulse">
+          <div>
+            <div class="h-7 w-48 bg-white/10 rounded mb-4"></div>
+            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4">
+              ${Array(6).fill(0).map(() => `
+                <div>
+                  <div class="aspect-square bg-white/10 rounded-md mb-2"></div>
+                  <div class="h-4 bg-white/10 rounded w-3/4 mb-1"></div>
+                  <div class="h-3 bg-white/5 rounded w-1/2"></div>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // --- PLAYBACK LOGIC ---
+    function startPlayback(track) {
+      if (!track) return;
+      document.getElementById('progress-scrubber').disabled = false;
+
+      const yt = document.getElementById('yt-engine');
+      if (track.audioUrl) {
+        if (yt) yt.src = '';
+        audio.src = track.audioUrl;
+        audio.play().then(() => {
+          isPlaying = true;
+          updatePlayPauseIcon();
+        }).catch(() => {
+          isPlaying = false;
+          updatePlayPauseIcon();
+        });
+      } else if (track.videoId) {
+        // Real YouTube playback: the nocookie embed. The audio element has
+        // no file for these tracks, so playing it silently would be fake.
+        audio.pause();
+        audio.removeAttribute('src');
+        if (yt) yt.src = `https://www.youtube-nocookie.com/embed/${track.videoId}?autoplay=1&rel=0`;
+        isPlaying = true;
+        updatePlayPauseIcon();
+      } else {
+        audio.removeAttribute('src');
+        isPlaying = true;
+        updatePlayPauseIcon();
+      }
+
+      emitEvent('onTrackPlay', track);
+      loadTrackUI(track);
+    }
+
+    function loadTrackUI(track) {
+      if (!track) return;
+
+      const playerArt = document.getElementById('player-art');
+      const playerPlaceholder = document.getElementById('player-art-placeholder');
+      const drawerArt = document.getElementById('drawer-art');
+      const drawerPlaceholder = document.getElementById('drawer-art-placeholder');
+
+      if (track.cover) {
+        playerArt.src = track.cover;
+        playerArt.classList.remove('hidden');
+        playerPlaceholder.classList.add('hidden');
+
+        drawerArt.src = track.cover;
+        drawerArt.classList.remove('hidden');
+        drawerPlaceholder.classList.add('hidden');
+      } else {
+        playerArt.classList.add('hidden');
+        playerPlaceholder.classList.remove('hidden');
+        drawerArt.classList.add('hidden');
+        drawerPlaceholder.classList.remove('hidden');
+      }
+
+      document.getElementById('player-title').textContent = track.title || 'Untitled';
+      document.getElementById('player-artist').textContent = [track.artist, track.album].filter(Boolean).join(' • ');
+      document.title = isPlaying ? `${track.title} - My Music` : 'My Music';
+
+      if (track.color) {
+        document.getElementById('ambient-bg').style.background =
+          `radial-gradient(circle at 25% 0%, ${track.color} 0%, rgba(17, 24, 39, 0.2) 45%, rgba(3, 3, 3, 1) 80%)`;
+      }
+
+      updateLikeButtonsUI();
+      updateProgressUI();
+      renderDrawerContent();
+      renderContent();
+    }
+
+    function togglePlay() {
+      if (!queue.length) {
+        showToast('No tracks in queue');
+        return;
+      }
+      if (currentIndex === -1) {
+        currentIndex = 0;
+        startPlayback(queue[0]);
+        return;
+      }
+
+      const cur = queue[currentIndex];
+      const yt = document.getElementById('yt-engine');
+      if (cur && cur.videoId && !cur.audioUrl && yt) {
+        if (isPlaying) { yt.src = ''; isPlaying = false; }
+        else { yt.src = `https://www.youtube-nocookie.com/embed/${cur.videoId}?autoplay=1&rel=0`; isPlaying = true; }
+      } else if (audio.src) {
+        if (audio.paused) {
+          audio.play().catch(() => {});
+          isPlaying = true;
+        } else {
+          audio.pause();
+          isPlaying = false;
+        }
+      } else {
+        isPlaying = !isPlaying;
+      }
+
+      updatePlayPauseIcon();
+      renderContent();
+      renderDrawerContent();
+    }
+
+    function updatePlayPauseIcon() {
+      document.getElementById('play-pause-icon').textContent = isPlaying ? 'pause' : 'play_arrow';
+    }
+
+    function playTrackById(id) {
+      const idx = queue.findIndex(t => String(t.id) === String(id));
+      if (idx !== -1) {
+        if (currentIndex === idx) {
+          togglePlay();
+        } else {
+          currentIndex = idx;
+          startPlayback(queue[currentIndex]);
+        }
+      }
+    }
+
+    function handleAlbumClick(albumId, trackId) {
+      emitEvent('onAlbumSelect', albumId);
+      if (trackId) playTrackById(trackId);
+    }
+
+    function nextTrack() {
+      if (!queue.length) return;
+      currentIndex = (currentIndex + 1) % queue.length;
+      startPlayback(queue[currentIndex]);
+    }
+
+    function prevTrack() {
+      if (!queue.length) return;
+      if (audio.currentTime > 4) {
+        audio.currentTime = 0;
+      } else {
+        currentIndex = (currentIndex - 1 + queue.length) % queue.length;
+        startPlayback(queue[currentIndex]);
+      }
+    }
+
+    function shuffleQueue() {
+      if (!queue.length) return;
+      const currentTrack = queue[currentIndex];
+      queue = [...queue].sort(() => Math.random() - 0.5);
+      currentIndex = currentTrack ? queue.findIndex(t => t.id === currentTrack.id) : 0;
+      if (!isPlaying && queue[currentIndex]) {
+        startPlayback(queue[currentIndex]);
+      } else {
+        renderDrawerContent();
+      }
+      showToast('Queue shuffled');
+    }
+
+    function toggleRepeat() {
+      isRepeat = !isRepeat;
+      const btn = document.getElementById('repeat-btn');
+      btn.classList.toggle('text-white', isRepeat);
+      btn.classList.toggle('text-zinc-400', !isRepeat);
+      showToast(isRepeat ? 'Repeat enabled' : 'Repeat off');
+    }
+
+    function toggleMute() {
+      isMuted = !isMuted;
+      audio.volume = isMuted ? 0 : volume;
+      document.getElementById('volume-slider').value = isMuted ? 0 : volume * 100;
+      updateVolumeIcon();
+    }
+
+    function updateVolumeIcon() {
+      const icon = document.getElementById('volume-icon');
+      if (isMuted || volume === 0) icon.textContent = 'volume_off';
+      else if (volume < 0.5) icon.textContent = 'volume_down';
+      else icon.textContent = 'volume_up';
+    }
+
+    function updateProgressUI() {
+      const track = queue[currentIndex];
+      const cur = audio.currentTime || 0;
+      const dur = audio.duration || track?.duration || 0;
+      const pct = dur > 0 ? Math.min(100, (cur / dur) * 100) : 0;
+
+      document.getElementById('progress-scrubber').value = pct;
+      document.getElementById('progress-fill').style.width = `${pct}%`;
+      document.getElementById('time-display').textContent = `${formatTime(cur)} / ${formatTime(dur)}`;
+    }
+
+    function formatTime(sec) {
+      if (!sec || isNaN(sec)) return '0:00';
+      const m = Math.floor(sec / 60);
+      const s = Math.floor(sec % 60);
+      return `${m}:${s < 10 ? '0' : ''}${s}`;
+    }
+
+    // --- LIKES & PLAYLISTS ---
+    function toggleLikeCurrent() {
+      const track = queue[currentIndex];
+      if (track) toggleLikeById(track.id);
+    }
+
+    function toggleLikeById(id) {
+      const isLiked = state.likedIds.has(id);
+      if (isLiked) {
+        state.likedIds.delete(id);
+      } else {
+        state.likedIds.add(id);
+        state.dislikedIds.delete(id);
+      }
+      emitEvent('onLikeToggle', { id, liked: !isLiked });
+      updateLikeButtonsUI();
+      renderContent();
+    }
+
+    function toggleDislike() {
+      const track = queue[currentIndex];
+      if (!track) return;
+      const id = track.id;
+      const isDisliked = state.dislikedIds.has(id);
+      if (isDisliked) {
+        state.dislikedIds.delete(id);
+      } else {
+        state.dislikedIds.add(id);
+        state.likedIds.delete(id);
+      }
+      emitEvent('onDislikeToggle', { id, disliked: !isDisliked });
+      updateLikeButtonsUI();
+    }
+
+    function updateLikeButtonsUI() {
+      const id = queue[currentIndex]?.id;
+      const likeIcon = document.querySelector('#like-btn span');
+      const dislikeIcon = document.querySelector('#dislike-btn span');
+      if (likeIcon) likeIcon.classList.toggle('filled', state.likedIds.has(id));
+      if (dislikeIcon) dislikeIcon.classList.toggle('filled', state.dislikedIds.has(id));
+    }
+
+    function handleCreatePlaylist() {
+      const name = prompt('Enter new playlist name:');
+      if (name && name.trim()) {
+        emitEvent('onCreatePlaylist', name.trim());
+      }
+    }
+
+    // --- UP NEXT / LYRICS / RELATED DRAWER ---
+    function toggleDrawer() {
+      drawerOpen = !drawerOpen;
+      const drawer = document.getElementById('player-drawer');
+      const caret = document.getElementById('drawer-caret');
+      drawer.classList.toggle('translate-y-full', !drawerOpen);
+      caret.classList.toggle('rotate-180', drawerOpen);
+      renderDrawerContent();
+    }
+
+    function switchDrawerTab(tab) {
+      activeDrawerTab = tab;
+      ['upnext', 'lyrics', 'related'].forEach(t => {
+        const btn = document.getElementById(`tab-${t}`);
+        btn.classList.toggle('border-white', t === tab);
+        btn.classList.toggle('text-white', t === tab);
+        btn.classList.toggle('border-transparent', t !== tab);
+      });
+      renderDrawerContent();
+    }
+
+    function toggleMediaMode(mode) {
+      const songBtn = document.getElementById('mode-song-btn');
+      const videoBtn = document.getElementById('mode-video-btn');
+      const visualizer = document.getElementById('video-visualizer');
+
+      if (mode === 'video') {
+        videoBtn.classList.add('bg-white/15', 'text-white');
+        videoBtn.classList.remove('text-zinc-400');
+        songBtn.classList.remove('bg-white/15', 'text-white');
+        songBtn.classList.add('text-zinc-400');
+        visualizer.classList.remove('hidden');
+      } else {
+        songBtn.classList.add('bg-white/15', 'text-white');
+        songBtn.classList.remove('text-zinc-400');
+        videoBtn.classList.remove('bg-white/15', 'text-white');
+        videoBtn.classList.add('text-zinc-400');
+        visualizer.classList.add('hidden');
+      }
+    }
+
+    function renderDrawerContent() {
+      const container = document.getElementById('drawer-tab-content');
+      document.getElementById('queue-count').textContent = queue.length;
+      const currentTrack = queue[currentIndex];
+
+      if (activeDrawerTab === 'upnext') {
+        if (!queue.length) {
+          container.innerHTML = `<div class="py-12 text-center text-xs text-zinc-500">Queue is empty</div>`;
+          return;
+        }
+        container.innerHTML = queue.map((track, idx) => {
+          const isCurrent = idx === currentIndex;
+          return `
+            <div onclick="playTrackById('${track.id}')" class="flex items-center justify-between p-2 rounded-md hover:bg-white/10 cursor-pointer group transition ${isCurrent ? 'bg-white/10' : ''}">
+              <div class="flex items-center gap-3 overflow-hidden">
+                <div class="relative w-10 h-10 rounded overflow-hidden flex-shrink-0 bg-zinc-800 flex items-center justify-center">
+                  ${track.cover ? `<img src="${track.cover}" class="w-full h-full object-cover" />` : `<span class="material-symbols-outlined text-zinc-500 text-sm">music_note</span>`}
+                </div>
+                <div class="overflow-hidden">
+                  <div class="text-sm font-medium ${isCurrent ? 'text-white' : 'text-zinc-200'} truncate">${escapeHtml(track.title)}</div>
+                  <div class="text-xs text-zinc-400 truncate">${escapeHtml(track.artist || '')}</div>
+                </div>
+              </div>
+              <span class="text-xs text-zinc-400 tabular-nums ml-2">${formatTime(track.duration || 0)}</span>
+            </div>
+          `;
+        }).join('');
+      } else if (activeDrawerTab === 'lyrics') {
+        const lyrics = currentTrack?.lyrics;
+        if (!lyrics || !lyrics.length) {
+          container.innerHTML = `<div class="py-12 text-center text-xs text-zinc-500">No lyrics available for this track.</div>`;
+          return;
+        }
+        const lines = Array.isArray(lyrics) ? lyrics : String(lyrics).split('\n');
+        container.innerHTML = `
+          <div class="p-4 space-y-3 text-base sm:text-lg font-medium leading-relaxed text-zinc-300">
+            ${lines.map(line => line ? `<p>${escapeHtml(line)}</p>` : '<br/>').join('')}
+          </div>
+        `;
+      } else {
+        if (!state.tracks.length) {
+          container.innerHTML = `<div class="py-12 text-center text-xs text-zinc-500">No related tracks found.</div>`;
+          return;
+        }
+        container.innerHTML = state.tracks.slice(0, 8).map(track => `
+          <div onclick="playTrackById('${track.id}')" class="flex items-center justify-between p-2 rounded hover:bg-white/10 cursor-pointer">
+            <div class="flex items-center gap-3 overflow-hidden">
+              <div class="w-10 h-10 rounded bg-zinc-800 overflow-hidden flex-shrink-0">
+                ${track.cover ? `<img src="${track.cover}" class="w-full h-full object-cover" />` : ''}
+              </div>
+              <div class="overflow-hidden">
+                <div class="text-sm font-medium text-white truncate">${escapeHtml(track.title)}</div>
+                <div class="text-xs text-zinc-400 truncate">${escapeHtml(track.artist || '')}</div>
+              </div>
+            </div>
+            <span class="material-symbols-outlined text-zinc-400">play_arrow</span>
+          </div>
+        `).join('');
+      }
+    }
+
+    // --- UTILITIES ---
+    function escapeHtml(str) {
+      return String(str || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    let toastTimeout;
+    function showToast(msg) {
+      const toast = document.getElementById('toast');
+      toast.textContent = msg;
+      toast.classList.remove('opacity-0');
+      clearTimeout(toastTimeout);
+      toastTimeout = setTimeout(() => {
+        toast.classList.add('opacity-0');
+      }, 2400);
+    }
+  </script>
+  <script src="/bridge.js"></script>
 </body>
 </html>

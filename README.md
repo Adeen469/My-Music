@@ -66,6 +66,16 @@ set `AUTH_ENABLED=true` in Vercel, keep `GOOGLE_CLIENT_ID`,
   make it a strong unique password (do not use a short default), and
   never commit it or paste it in chat.
 
+## Frontend — Tailwind UI + bridge
+
+The frontend is the uploaded Tailwind UI (`public/index.html`, zero
+dummy data) plus `public/bridge.js`, which connects its
+`window.MyMusicAPI` to this backend: trending/search from YouTube,
+Library from this browser (no sign-in), Offline from IndexedDB, and
+Downloads. YouTube tracks play through the youtube-nocookie embed
+(patched into the UI's playback code); file tracks play through the
+UI's native `<audio>` engine. No YouTube stream is extracted.
+
 ## Downloads & offline — where files actually go
 
 - **Download** (no picker): the file goes to the browser's Downloads
@@ -158,6 +168,6 @@ an env var in Vercel needs a redeploy to take effect.
 .env                  # root env file (gitignored, fill in locally)
 .env.example          # blank template for .env
 server.js             # Express backend + YouTube / Google / Supabase APIs (also the Vercel entrypoint)
-public/               # frontend (index.html, styles.css, main.js)
+public/               # frontend (index.html = Tailwind UI, bridge.js = backend wiring)
 supabase/schema.sql   # saved_tracks table
 ```
