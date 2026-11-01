@@ -102,16 +102,24 @@ empty state and a clear message instead of fake songs.
 
 ## Deploying to Vercel
 
-This repo uses Vercel's zero-config Express deployment: the root
-`server.js` exports the Express app (and serves the frontend from
-`public/` itself), so Vercel auto-detects it as the entrypoint. There is
-deliberately **no `vercel.json` and no `api/` folder** — an earlier version
-had both, and Vercel's build failed with
-`No entrypoint found which imports express. Found possible entrypoint: app.js`,
-because the frontend file `public/app.js` looked like a server entrypoint
-to Vercel's detector and the rewrites conflicted with it. The frontend
-script is therefore named `public/main.js`, not `app.js`. Locally,
-`npm start` still runs the same Express app directly.
+This repo uses Vercel's Express deployment with the output directory
+`public` (see `vercel.json`). The entrypoint Vercel looks for must live
+inside that output directory, so `public/server.js` is a small shim that
+directly requires Express and re-exports the real app from the root
+`server.js` (which also serves the frontend from `public/` itself).
+There is deliberately **no `api/` folder and no rewrites** — an earlier
+version had both, and Vercel's build failed twice: first with
+`No entrypoint found which imports express. Found possible entrypoint: app.js`
+(the frontend file `public/app.js` looked like a server entrypoint), then
+with `No entrypoint found in output directory: "public"` (deleting
+`vercel.json` did not clear the Output Directory saved in the Vercel
+project settings, so Vercel only searched inside `public/`). The frontend
+script is therefore named `public/main.js`, not `app.js`, and the
+entrypoint shim is `public/server.js`. Locally, `npm start` still runs
+the root `server.js` directly. If you ever clear the Output Directory in
+the Vercel project settings, the root `server.js` alone would also work
+— but with `vercel.json` setting it to `public`, the shim is the path
+that is actually used.
 
 After importing the repo into Vercel, set these environment variables in the
 Vercel project settings (Production) — do not paste real values in chat:
