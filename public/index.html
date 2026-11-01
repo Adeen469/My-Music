@@ -275,6 +275,30 @@
             <span id="video-placeholder-text" class="text-xs uppercase tracking-widest text-zinc-500">No Video Stream Attached</span>
           </div>
         </div>
+
+        <!-- Now-playing transport (visible on mobile too, where the mini
+             player has no room for seek/volume/shuffle/repeat) -->
+        <div class="w-full max-w-md mt-5">
+          <input id="drawer-scrubber" type="range" min="0" max="100" value="0" class="yt-scrubber w-full" />
+          <div class="flex justify-between text-xs text-zinc-400 tabular-nums mt-1">
+            <span id="drawer-time-cur">0:00</span>
+            <span id="drawer-time-total">0:00</span>
+          </div>
+          <div class="flex items-center justify-center gap-2 sm:gap-3 mt-3">
+            <button onclick="seekBy(-10)" class="p-2 rounded-full hover:bg-white/10 text-zinc-200" title="Back 10 seconds"><span class="material-symbols-outlined text-xl">replay_10</span></button>
+            <button onclick="prevTrack()" class="p-2 rounded-full hover:bg-white/10" title="Previous"><span class="material-symbols-outlined text-2xl filled">skip_previous</span></button>
+            <button onclick="togglePlay()" class="w-12 h-12 rounded-full bg-white text-black flex items-center justify-center" title="Play/Pause"><span id="drawer-play-icon" class="material-symbols-outlined text-3xl filled">play_arrow</span></button>
+            <button onclick="nextTrack()" class="p-2 rounded-full hover:bg-white/10" title="Next"><span class="material-symbols-outlined text-2xl filled">skip_next</span></button>
+            <button onclick="seekBy(10)" class="p-2 rounded-full hover:bg-white/10 text-zinc-200" title="Forward 10 seconds"><span class="material-symbols-outlined text-xl">forward_10</span></button>
+          </div>
+          <div class="flex items-center justify-center gap-3 mt-4">
+            <button onclick="shuffleQueue()" class="p-2 rounded-full hover:bg-white/10 text-zinc-300" title="Shuffle"><span class="material-symbols-outlined text-xl">shuffle</span></button>
+            <button onclick="toggleRepeat()" class="p-2 rounded-full hover:bg-white/10 text-zinc-400" title="Repeat"><span class="material-symbols-outlined text-xl">repeat</span></button>
+            <span class="material-symbols-outlined text-zinc-400 text-xl">volume_up</span>
+            <input id="drawer-volume" type="range" min="0" max="100" value="80" class="vol-slider w-28" />
+            <button onclick="toggleMute()" class="p-2 rounded-full hover:bg-white/10 text-zinc-300" title="Mute"><span class="material-symbols-outlined text-xl">volume_off</span></button>
+          </div>
+        </div>
       </div>
 
       <!-- Right Side: Up Next / Lyrics / Related Tabs -->
@@ -314,7 +338,7 @@
 
     <!-- Left: Transport Controls & Time -->
     <div class="flex items-center gap-1 sm:gap-3 md:w-1/4 md:min-w-[180px]">
-      <button onclick="prevTrack()" class="hidden sm:flex p-2 rounded-full hover:bg-white/10 transition items-center justify-center" title="Previous">
+      <button onclick="prevTrack()" class="p-2 rounded-full hover:bg-white/10 transition items-center justify-center" title="Previous">
         <span class="material-symbols-outlined text-2xl filled">skip_previous</span>
       </button>
       <button id="play-pause-btn" onclick="togglePlay()" class="w-9 h-9 sm:w-10 sm:h-10 rounded-full hover:bg-white/10 transition flex items-center justify-center" title="Play/Pause">
@@ -323,7 +347,7 @@
       <button onclick="nextTrack()" class="p-1.5 sm:p-2 rounded-full hover:bg-white/10 transition flex items-center justify-center" title="Next">
         <span class="material-symbols-outlined text-2xl filled">skip_next</span>
       </button>
-      <span id="time-display" class="text-xs text-zinc-400 hidden lg:inline-block ml-1 tabular-nums">0:00 / 0:00</span>
+      <span id="time-display" class="text-xs text-zinc-400 inline-block ml-1 tabular-nums whitespace-nowrap">0:00 / 0:00</span>
     </div>
 
     <!-- Center: Active Track Info & Like/Dislike -->
@@ -540,23 +564,24 @@
 
       // Scrubber input
       const scrubber = document.getElementById('progress-scrubber');
-      scrubber.addEventListener('input', (e) => {
+      const scrubTo = (pctValue) => {
         const track = queue[currentIndex];
-        const duration = audio.duration || track?.duration || 0;
+        const duration = (track && track.videoId && !track.audioUrl && window.__ytState && window.__ytState.duration) ? window.__ytState.duration : (audio.duration || track?.duration || 0);
         if (duration > 0) {
-          audio.currentTime = (e.target.value / 100) * duration;
+          if (track && track.videoId && !track.audioUrl && window.__ytSeekTo) window.__ytSeekTo((pctValue / 100) * duration);
+          else audio.currentTime = (pctValue / 100) * duration;
           updateProgressUI();
         }
-      });
+      };
+      scrubber.addEventListener('input', (e) => scrubTo(e.target.value));
+      const drawerScrubber = document.getElementById('drawer-scrubber');
+      if (drawerScrubber) drawerScrubber.addEventListener('input', (e) => scrubTo(e.target.value));
 
       // Volume slider
       const volSlider = document.getElementById('volume-slider');
-      volSlider.addEventListener('input', (e) => {
-        volume = e.target.value / 100;
-        isMuted = volume === 0;
-        audio.volume = isMuted ? 0 : volume;
-        updateVolumeIcon();
-      });
+      if (volSlider) volSlider.addEventListener('input', (e) => setVolume(e.target.value / 100));
+      const drawerVol = document.getElementById('drawer-volume');
+      if (drawerVol) drawerVol.addEventListener('input', (e) => setVolume(e.target.value / 100));
 
       // Spacebar play/pause shortcut
       window.addEventListener('keydown', (e) => {
@@ -962,6 +987,7 @@
                 <button onclick="toggleLikeById('${song.id}')" class="px-4 py-2.5 rounded-full border border-white/20 hover:bg-white/10 text-sm flex items-center gap-2"><span class="material-symbols-outlined text-lg ${isLiked ? 'filled text-white' : ''}">thumb_up</span>${isLiked ? 'Saved' : 'Save'}</button>
                 <button onclick="shareCurrentPage()" class="px-4 py-2.5 rounded-full border border-white/20 hover:bg-white/10 text-sm flex items-center gap-2"><span class="material-symbols-outlined text-lg">share</span>Share</button>
               </div>
+              ${song.duration ? `<p class="text-sm text-zinc-400 mt-2">Duration: ${formatTime(song.duration)}</p>` : ''}
               <p class="text-xs text-zinc-500 mt-4">Shareable link: <span class="text-zinc-300 break-all">${escapeHtml(location.href)}</span></p>
               <p class="text-xs text-zinc-500 mt-2">Lyrics are not available — no lyrics source is connected, so none are shown here.</p>
             </div>
@@ -1242,9 +1268,8 @@
     }
 
     function toggleMute() {
-      isMuted = !isMuted;
-      audio.volume = isMuted ? 0 : volume;
-      document.getElementById('volume-slider').value = isMuted ? 0 : volume * 100;
+      if (isMuted || volume === 0) { setVolume(0.8); isMuted = false; }
+      else { isMuted = true; audio.volume = 0; if (window.__ytSetVolume) window.__ytSetVolume(0); }
       updateVolumeIcon();
     }
 
@@ -1257,13 +1282,47 @@
 
     function updateProgressUI() {
       const track = queue[currentIndex];
-      const cur = audio.currentTime || 0;
-      const dur = audio.duration || track?.duration || 0;
+      // YouTube tracks play through the IFrame API (bridge), not the
+      // audio element, so their time comes from there. File tracks
+      // use the audio element as before.
+      const isYT = track && track.videoId && !track.audioUrl && window.__ytState;
+      const cur = isYT ? (window.__ytState.current || 0) : (audio.currentTime || 0);
+      const dur = isYT ? (window.__ytState.duration || track.duration || 0) : (audio.duration || track?.duration || 0);
       const pct = dur > 0 ? Math.min(100, (cur / dur) * 100) : 0;
 
       document.getElementById('progress-scrubber').value = pct;
       document.getElementById('progress-fill').style.width = `${pct}%`;
       document.getElementById('time-display').textContent = `${formatTime(cur)} / ${formatTime(dur)}`;
+      const ds = document.getElementById('drawer-scrubber');
+      if (ds) ds.value = pct;
+      const dc = document.getElementById('drawer-time-cur');
+      if (dc) dc.textContent = formatTime(cur);
+      const dt = document.getElementById('drawer-time-total');
+      if (dt) dt.textContent = formatTime(dur);
+      const dpi = document.getElementById('drawer-play-icon');
+      if (dpi) dpi.textContent = isPlaying ? 'pause' : 'play_arrow';
+    }
+    function seekBy(seconds) {
+      const track = queue[currentIndex];
+      if (!track) return;
+      if (track.videoId && !track.audioUrl && window.__ytSeekTo && window.__ytState) {
+        const dur = window.__ytState.duration || track.duration || 0;
+        window.__ytSeekTo(Math.max(0, Math.min(dur, (window.__ytState.current || 0) + seconds)));
+      } else {
+        audio.currentTime = Math.max(0, Math.min(audio.duration || Infinity, (audio.currentTime || 0) + seconds));
+      }
+      updateProgressUI();
+    }
+    function setVolume(value01) {
+      volume = Math.max(0, Math.min(1, value01));
+      isMuted = volume === 0;
+      audio.volume = isMuted ? 0 : volume;
+      if (window.__ytSetVolume) window.__ytSetVolume(volume * 100);
+      const vs = document.getElementById('volume-slider');
+      if (vs) vs.value = volume * 100;
+      const dv = document.getElementById('drawer-volume');
+      if (dv) dv.value = volume * 100;
+      updateVolumeIcon();
     }
 
     function formatTime(sec) {

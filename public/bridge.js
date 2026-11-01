@@ -11,12 +11,63 @@
 //    embed instead. No stream is extracted, and no YouTube track ever
 //    pretends to play from the audio element.
 (function () {
+  // YouTube IFrame Player API: this is what makes seek, progress,
+  // duration and volume actually work for YouTube tracks. A plain
+  // nocookie embed with autoplay cannot report time or seek, so the
+  // old hidden-iframe approach left everything at 0:00 and made the
+  // scrubber and volume do nothing for YouTube songs.
+  const ytDiv = document.createElement("div");
+  ytDiv.id = "yt-player-div";
+  ytDiv.style.cssText = "position:fixed;left:-9999px;top:-9999px;width:1px;height:1px;overflow:hidden;";
+  document.body.appendChild(ytDiv);
+  // Fallback iframe, used only if the IFrame API never loads.
   const yt = document.createElement("iframe");
   yt.id = "yt-engine";
   yt.allow = "autoplay; encrypted-media";
   yt.allowFullscreen = true;
   yt.style.cssText = "position:fixed;left:-9999px;top:-9999px;width:1px;height:1px;border:0;";
   document.body.appendChild(yt);
+  let ytPlayer = null;
+  let ytReady = false;
+  let ytPendingId = null;
+  window.__ytState = { current: 0, duration: 0 };
+  window.__ytSeekTo = (sec) => { try { if (ytPlayer && ytReady) ytPlayer.seekTo(Math.max(0, sec), true); } catch {} };
+  window.__ytSetVolume = (vol100) => { try { if (ytPlayer && ytReady) ytPlayer.setVolume(Math.max(0, Math.min(100, vol100))); } catch {} };
+  window.__ytPlay = () => { try { if (ytPlayer && ytReady) ytPlayer.playVideo(); } catch {} };
+  window.__ytPause = () => { try { if (ytPlayer && ytReady) ytPlayer.pauseVideo(); } catch {} };
+  function ytLoad(id) {
+    ytPendingId = id;
+    if (ytPlayer && ytReady) { yt.src = ""; ytPlayer.loadVideoById(id); }
+    else { yt.src = `https://www.youtube-nocookie.com/embed/${id}?autoplay=1&rel=0`; }
+  }
+  function ytStop() { ytPendingId = null; yt.src = ""; try { if (ytPlayer && ytReady) ytPlayer.stopVideo(); } catch {} }
+  window.onYouTubeIframeAPIReady = () => {
+    try {
+      ytPlayer = new YT.Player("yt-player-div", {
+        height: "1", width: "1",
+        playerVars: { autoplay: 0, rel: 0, playsinline: 1 },
+        events: {
+          onReady: () => { ytReady = true; if (ytPendingId) { yt.src = ""; ytPlayer.loadVideoById(ytPendingId); } },
+          onStateChange: (e) => {
+            // 0 = ended -> next track (same as the audio element's ended handler)
+            if (e.data === 0) { try { if (!isRepeat) nextTrack(); else if (ytPlayer) ytPlayer.playVideo(); } catch {} }
+          },
+        },
+      });
+    } catch {}
+  };
+  const ytScript = document.createElement("script");
+  ytScript.src = "https://www.youtube.com/iframe_api";
+  document.head.appendChild(ytScript);
+  // Poll the player for time/duration and repaint the progress UI.
+  setInterval(() => {
+    try {
+      if (ytPlayer && ytReady && typeof ytPlayer.getCurrentTime === "function") {
+        window.__ytState = { current: ytPlayer.getCurrentTime() || 0, duration: ytPlayer.getDuration() || 0 };
+        if (typeof updateProgressUI === "function") updateProgressUI();
+      }
+    } catch {}
+  }, 500);
 
   const API = window.MyMusicAPI;
   if (!API) return;
@@ -32,7 +83,7 @@
       audioUrl: it.downloadUrl || null,
       videoId: isFile ? null : it.id,
       downloadUrl: it.downloadUrl || null,
-      duration: 0, // not in the YouTube responses used here; shown as 0:00, not invented
+      duration: it.durationSeconds || 0, // real YouTube duration when the server returns it; 0 only if unknown, never invented
     };
   }
   function artistsFrom(tracks) {
@@ -83,21 +134,18 @@
   function syncYouTube() {
     try {
       const cur = queue[currentIndex];
-      if (!cur) { yt.src = ""; return; }
+      if (!cur) { ytStop(); return; }
       if (cur.videoId && !cur.audioUrl) {
-        yt.src = isPlaying ? `https://www.youtube-nocookie.com/embed/${cur.videoId}?autoplay=1&rel=0` : "";
+        if (isPlaying) { if (ytPlayer && ytReady) ytPlayer.playVideo(); else ytLoad(cur.videoId); }
+        else { if (ytPlayer && ytReady) ytPlayer.pauseVideo(); else yt.src = ""; }
       } else {
-        yt.src = "";
+        ytStop();
       }
     } catch { /* queue not ready yet */ }
   }
   API.on("onTrackPlay", (track) => {
-    // startPlayback already set isPlaying; sync the hidden embed to it.
-    if (track && track.videoId && !track.audioUrl) {
-      yt.src = `https://www.youtube-nocookie.com/embed/${track.videoId}?autoplay=1&rel=0`;
-    } else {
-      yt.src = "";
-    }
+    if (track && track.videoId && !track.audioUrl) ytLoad(track.videoId);
+    else ytStop();
   });
   function bindPlayPauseSync() {
     const btn = document.getElementById("play-pause-btn");

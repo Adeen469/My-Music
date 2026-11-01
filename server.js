@@ -63,6 +63,12 @@ function getUser(req) {
     return null;
   }
 }
+function parseDuration(iso) {
+  if (!iso) return null;
+  const m = /^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/.exec(iso);
+  if (!m) return null;
+  return (parseInt(m[1] || "0", 10) * 3600) + (parseInt(m[2] || "0", 10) * 60) + parseInt(m[3] || "0", 10);
+}
 function mapVideo(item) {
   const id = typeof item.id === "string" ? item.id : item.id && item.id.videoId;
   const s = item.snippet || {};
@@ -77,7 +83,22 @@ function mapVideo(item) {
     // It is only set for saved / file tracks the user attached a direct
     // audio link to (see /api/library and /api/library/download-url).
     downloadUrl: null,
+    // Real duration in seconds when YouTube returned contentDetails.
+    // Search results don't include it, so mergeDurations fills it in.
+    durationSeconds: item.contentDetails ? parseDuration(item.contentDetails.duration) : null,
   };
+}
+// Search/related/artist use the search endpoint, which has no duration.
+// One cheap videos.list call (cost 1) fills durations for all ids.
+async function mergeDurations(items) {
+  const ids = (items || []).filter((x) => x.durationSeconds == null).map((x) => x.id).filter(Boolean);
+  if (!ids.length) return items;
+  try {
+    const data = await youtube("videos", { part: "contentDetails", id: ids.join(",") });
+    const byId = new Map((data.items || []).map((it) => [typeof it.id === "string" ? it.id : it.id.videoId, parseDuration(it.contentDetails && it.contentDetails.duration)]));
+    for (const x of items) if (x.durationSeconds == null && byId.has(x.id)) x.durationSeconds = byId.get(x.id);
+  } catch { /* duration stays null; the UI shows 0:00 rather than a fake time */ }
+  return items;
 }
 async function youtube(pathname, params) {
   if (!YOUTUBE_API) {
@@ -120,7 +141,7 @@ app.get("/api/search", async (req, res) => {
     const data = await youtube("search", {
       part: "snippet", type: "video", q, maxResults: "25", order: "relevance",
     });
-    res.json({ items: (data.items || []).map(mapVideo) });
+    res.json({ items: await mergeDurations((data.items || []).map(mapVideo)) });
   } catch (e) {
     res.status(e.status || 500).json({ error: e.message });
   }
@@ -129,7 +150,7 @@ app.get("/api/search", async (req, res) => {
 app.get("/api/trending", async (req, res) => {
   try {
     const data = await youtube("videos", {
-      part: "snippet,statistics", chart: "mostPopular",
+      part: "snippet,statistics,contentDetails", chart: "mostPopular",
       videoCategoryId: "10", maxResults: "25",
     });
     res.json({ items: (data.items || []).map(mapVideo) });
@@ -158,7 +179,7 @@ app.get("/api/artist/:name", async (req, res) => {
     const data = await youtube("search", {
       part: "snippet", type: "video", q: name, maxResults: "25", order: "relevance",
     });
-    const all = (data.items || []).map(mapVideo);
+    const all = await mergeDurations((data.items || []).map(mapVideo));
     // Only songs actually by this channel, not just relevance matches.
     const exact = all.filter((t) => t.channel.toLowerCase() === name.toLowerCase());
     res.json({ items: exact, searched: all.length, exact: exact.length });
@@ -172,7 +193,7 @@ app.get("/api/related/:id", async (req, res) => {
     const data = await youtube("search", {
       part: "snippet", type: "video", relatedToVideoId: req.params.id, maxResults: "12",
     });
-    res.json({ items: (data.items || []).map(mapVideo) });
+    res.json({ items: await mergeDurations((data.items || []).map(mapVideo)) });
   } catch (e) {
     res.status(e.status || 500).json({ error: e.message });
   }
