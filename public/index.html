@@ -292,6 +292,7 @@
             <button onclick="seekBy(10)" class="p-2 rounded-full hover:bg-white/10 text-zinc-200" title="Forward 10 seconds"><span class="material-symbols-outlined text-xl">forward_10</span></button>
           </div>
           <div class="flex items-center justify-center gap-3 mt-4">
+            <button onclick="toggleAutoplay()" class="p-2 rounded-full hover:bg-white/10 text-zinc-300" title="Autoplay: recommended song when a song ends"><span class="material-symbols-outlined text-xl">auto_awesome</span></button>
             <button onclick="shuffleQueue()" class="p-2 rounded-full hover:bg-white/10 text-zinc-300" title="Shuffle"><span class="material-symbols-outlined text-xl">shuffle</span></button>
             <button onclick="toggleRepeat()" class="p-2 rounded-full hover:bg-white/10 text-zinc-400" title="Repeat"><span class="material-symbols-outlined text-xl">repeat</span></button>
             <span class="material-symbols-outlined text-zinc-400 text-xl">volume_up</span>
@@ -422,6 +423,7 @@
       albums: [],
       artists: [],
       playlists: [],
+      recommendations: { recommended: [], supermix: [], discover: [], replay: [], newReleases: [], hasHistory: false },
       moods: [],
       likedIds: new Set(),
       dislikedIds: new Set(),
@@ -475,6 +477,11 @@
         renderMoodChips();
         renderContent();
         renderDrawerContent();
+      },
+
+      setRecommendations(mixes) {
+        state.recommendations = mixes || state.recommendations;
+        renderContent();
       },
 
       /**
@@ -557,6 +564,8 @@
         if (isRepeat) {
           audio.currentTime = 0;
           audio.play().catch(() => {});
+        } else if (window.__autoplayOn !== false && typeof window.__playRecommendedNext === 'function') {
+          window.__playRecommendedNext();
         } else {
           nextTrack();
         }
@@ -767,6 +776,56 @@
       renderContent();
     }
 
+    function playMix(mixId) {
+      const tracks = state.recommendations[mixId] || [];
+      if (!tracks.length) return;
+      queue = [...tracks];
+      currentIndex = 0;
+      startPlayback(queue[0]);
+    }
+    function playMixTrack(mixId, id) {
+      const tracks = state.recommendations[mixId] || [];
+      const idx = tracks.findIndex(t => String(t.id) === String(id));
+      if (idx === -1) return;
+      queue = [...tracks];
+      currentIndex = idx;
+      startPlayback(queue[currentIndex]);
+    }
+    function toggleAutoplay() {
+      window.__autoplayOn = !(window.__autoplayOn !== false);
+      showToast(window.__autoplayOn ? 'Autoplay on — when a song ends, a recommended song plays next' : 'Autoplay off — when a song ends, the queue continues');
+    }
+    function renderMixSection(title, subtitle, tracks, mixId) {
+      if (!tracks || !tracks.length) return '';
+      return `
+        <section>
+          <div class="flex items-end justify-between mb-4">
+            <div>
+              <h2 class="text-xl sm:text-2xl md:text-3xl font-bold tracking-tight">${title}</h2>
+              <p class="text-xs text-zinc-400 mt-1">${subtitle}</p>
+            </div>
+            <button onclick="playMix('${mixId}')" class="px-3.5 py-1.5 rounded-full border border-white/20 hover:bg-white/10 text-xs font-medium transition">Play all</button>
+          </div>
+          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-8 gap-y-1.5">
+            ${tracks.slice(0, 9).map(track => `
+              <div onclick="playMixTrack('${mixId}', '${track.id}')" class="flex items-center justify-between p-2 rounded-md hover:bg-white/10 group cursor-pointer transition">
+                <div class="flex items-center gap-3 overflow-hidden">
+                  <div class="relative w-12 h-12 rounded overflow-hidden flex-shrink-0 bg-zinc-800 flex items-center justify-center">
+                    ${track.cover ? `<img src="${track.cover}" class="w-full h-full object-cover" />` : `<span class="material-symbols-outlined text-zinc-500">music_note</span>`}
+                  </div>
+                  <div class="overflow-hidden">
+                    <div class="text-sm font-medium text-white truncate">${escapeHtml(track.title)}</div>
+                    <div class="text-xs text-zinc-400 truncate">${escapeHtml(track.artist || '')}</div>
+                  </div>
+                </div>
+                <span class="text-xs text-zinc-400 tabular-nums ml-2">${formatTime(track.duration || 0)}</span>
+              </div>
+            `).join('')}
+          </div>
+        </section>
+      `;
+    }
+
     function renderContent() {
       const container = document.getElementById('content-area');
 
@@ -880,6 +939,16 @@
           `}
         </section>
 
+        ${renderMixSection('Recommended for you', 'Based on your plays, finishes, repeats, likes and skips in this browser — no account, no YouTube history.', state.recommendations.recommended, 'recommended')}
+        ${renderMixSection('Supermix', '70% favourites you already play, 20% similar artists, 10% new discovery.', state.recommendations.supermix, 'supermix')}
+        ${renderMixSection('Discover Mix', 'Songs you have never played, from artists you have only heard once or twice.', state.recommendations.discover, 'discover')}
+        ${renderMixSection('Replay Mix', 'Your most played songs in the last 30 days.', state.recommendations.replay, 'replay')}
+        ${renderMixSection('New Release Mix', 'Newest songs from artists you liked or saved.', state.recommendations.newReleases, 'newReleases')}
+        ${(!state.recommendations.hasHistory && state.tracks.length) ? `
+          <section class="border border-dashed border-white/10 rounded-xl p-4 text-sm text-zinc-400">
+            Your mixes will appear here as you listen. Play and like a few songs in this browser and Recommended, Supermix, Replay and Discover mixes will be built from your listening — no account and no YouTube watch history are used, so this starts empty on purpose, not with fake personal picks.
+          </section>
+        ` : ''}
         ${state.artists.length ? `
           <section>
             <div class="mb-4">

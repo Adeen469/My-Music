@@ -49,8 +49,13 @@
         events: {
           onReady: () => { ytReady = true; if (ytPendingId) { yt.src = ""; ytPlayer.loadVideoById(ytPendingId); } },
           onStateChange: (e) => {
-            // 0 = ended -> next track (same as the audio element's ended handler)
-            if (e.data === 0) { try { if (!isRepeat) nextTrack(); else if (ytPlayer) ytPlayer.playVideo(); } catch {} }
+            // 0 = ended -> autoplay: recommended next if autoplay is on,
+            // otherwise the next track in the queue.
+            if (e.data === 0) { try {
+              if (isRepeat && ytPlayer) ytPlayer.playVideo();
+              else if (window.__autoplayOn !== false && typeof window.__playRecommendedNext === "function") window.__playRecommendedNext();
+              else nextTrack();
+            } catch {} }
           },
         },
       });
@@ -84,6 +89,7 @@
       videoId: isFile ? null : it.id,
       downloadUrl: it.downloadUrl || null,
       duration: it.durationSeconds || 0, // real YouTube duration when the server returns it; 0 only if unknown, never invented
+      publishedAt: it.publishedAt || "",
     };
   }
   function artistsFrom(tracks) {
@@ -99,9 +105,154 @@
     localStorage.setItem("my_music_saved_tracks", JSON.stringify(list));
   }
 
+  // ---- RECOMMENDATION ENGINE (local, personal, no account) ----
+  // Honest limits, by design: Google sign-in is disabled and the YouTube
+  // Data API key cannot read the user's private YouTube watch history,
+  // and there is no cross-user data here, so there is NO neural Two
+  // Tower, NO collaborative filtering across users, and NO audio
+  // fingerprinting / BPM clustering. What this IS:
+  //  - Candidate pool: trending + search + related + artist tracks
+  //    actually seen in this browser (YouTube's related endpoint is
+  //    the closest available proxy for "people who heard X also heard Y").
+  //  - Signals, with the weights the user asked for: listen duration
+  //    (finish = strongest), repeat, skip <30s = strong dislike,
+  //    like/save, search, and time-of-day affinity for tracks the user
+  //    already played at a similar hour. All events stay in this
+  //    browser's localStorage; nothing is sent to a server account.
+  //  - Markov transitions: the user's own A -> B -> C plays, so the
+  //    next recommendation after A prefers the B the user actually
+  //    played after A before.
+  const REC_KEY = "my_music_rec_events";
+  let poolById = new Map();
+  let recEvents = [];
+  try { recEvents = JSON.parse(localStorage.getItem(REC_KEY) || "[]"); } catch { recEvents = []; }
+  let currentPlaying = null; // {track, at}
+  window.__autoplayOn = true;
+  function saveRecEvents() { try { localStorage.setItem(REC_KEY, JSON.stringify(recEvents.slice(-1000))); } catch {} }
+  function recordRec(ev) {
+    recEvents.push({ at: Date.now(), hour: new Date().getHours(), ...ev });
+    if (recEvents.length > 1000) recEvents = recEvents.slice(-1000);
+    saveRecEvents();
+  }
+  function trackStats() {
+    const stats = new Map();
+    const get = (id) => { if (!stats.has(id)) stats.set(id, { play: 0, finish: 0, skip: 0, partial: 0, like: 0, listened: 0, lastAt: 0, hours: new Set(), channels: new Set() }); return stats.get(id); };
+    for (const ev of recEvents) {
+      if (!ev.id) continue;
+      const s = get(ev.id);
+      if (ev.type === "play") { s.play += 1; s.lastAt = Math.max(s.lastAt, ev.at); }
+      if (ev.type === "finish") { s.finish += 1; s.listened += ev.listenedSec || 0; }
+      if (ev.type === "skip") { s.skip += 1; }
+      if (ev.type === "partial") { s.listened += ev.listenedSec || 0; }
+      if (ev.type === "like") s.like = 1;
+      if (ev.type === "unlike") s.like = 0;
+      if (ev.channel) s.channels.add(ev.channel);
+      if (typeof ev.hour === "number") s.hours.add(ev.hour);
+    }
+    // Saved tracks count as likes even if the like event predates this engine.
+    for (const s of localSaved()) { const st = get(s.id); st.like = 1; }
+    return stats;
+  }
+  function scoreTrack(track, stats, now) {
+    const s = stats.get(track.id);
+    if (!s) return 0;
+    let score = 0;
+    score += s.like * 50;
+    score += Math.min(40, s.play * 8);
+    score += Math.min(60, s.finish * 20);
+    score += Math.min(30, s.play > 1 ? 15 : 0); // repeat = love
+    score -= Math.min(60, s.skip * 30); // skip <30s = strong dislike
+    if (s.play && track.duration) score += Math.min(40, 40 * Math.min(1, (s.listened / Math.max(1, s.play)) / Math.max(1, track.duration)));
+    const daysAgo = (now - s.lastAt) / 86400000;
+    if (daysAgo <= 7) score += 10; else if (daysAgo <= 30) score += 5;
+    const hour = new Date().getHours();
+    for (const h of s.hours) if (Math.abs(h - hour) <= 2 || Math.abs(h - hour) >= 22) score += 10;
+    return score;
+  }
+  function buildMixes() {
+    const pool = [...poolById.values()];
+    const stats = trackStats();
+    const now = Date.now();
+    const likedChannels = new Set();
+    for (const [id, s] of stats) if (s.like) { const tr = poolById.get(id); if (tr) likedChannels.add(tr.artist); }
+    const scored = pool.map((tr) => ({ tr, score: scoreTrack(tr, stats, now), s: stats.get(tr.id) })).sort((a, b) => b.score - a.score);
+    const hasHistory = recEvents.some((e) => e.type === "play");
+    const recommended = hasHistory ? scored.filter((x) => x.score > 0).slice(0, 20).map((x) => x.tr) : [];
+    // Supermix: 70% known favourites, 20% similar artists, 10% new discovery
+    const known = scored.filter((x) => x.s && (x.s.play > 0 || x.s.like)).map((x) => x.tr);
+    const similar = scored.filter((x) => !known.includes(x.tr) && likedChannels.has(x.tr.artist)).map((x) => x.tr);
+    const discovery = scored.filter((x) => !x.s || x.s.play === 0).map((x) => x.tr);
+    const supermix = hasHistory ? [...known.slice(0, 14), ...similar.slice(0, 4), ...discovery.slice(0, 2)] : [];
+    // Discover Mix: never played, from artists played only 1-2 times, or new trending
+    const channelPlays = new Map();
+    for (const [, s] of stats) for (const ch of s.channels) channelPlays.set(ch, (channelPlays.get(ch) || 0) + s.play);
+    const discover = pool.filter((tr) => { const s = stats.get(tr.id); return !s || s.play === 0; })
+      .filter((tr) => { const cp = channelPlays.get(tr.artist) || 0; return cp >= 1 && cp <= 2; })
+      .concat(pool.filter((tr) => { const s = stats.get(tr.id); return !s || s.play === 0; }).slice(0, 10))
+      .filter((tr, i, arr) => arr.findIndex((x) => x.id === tr.id) === i).slice(0, 20);
+    // Replay Mix: most played in the last 30 days
+    const replay = scored.filter((x) => x.s && x.s.play > 0 && (now - x.s.lastAt) <= 30 * 86400000)
+      .sort((a, b) => (b.s.play * (1 + b.s.finish)) - (a.s.play * (1 + a.s.finish))).slice(0, 20).map((x) => x.tr);
+    // New Release Mix: newest songs from liked/followed channels, last 45 days
+    const newReleases = pool.filter((tr) => likedChannels.has(tr.artist) && tr.publishedAt && (now - new Date(tr.publishedAt).getTime()) <= 45 * 86400000)
+      .sort((a, b) => new Date(b.publishedAt) - new Date(a.publishedAt)).slice(0, 20);
+    return { recommended, supermix, discover, replay, newReleases, hasHistory };
+  }
+  function updateRecommendations() {
+    try {
+      const mixes = buildMixes();
+      window.__recommendations = mixes;
+      if (API.setRecommendations) API.setRecommendations(mixes);
+    } catch {}
+  }
+  function finishPreviousTrack() {
+    if (!currentPlaying) return;
+    const prev = currentPlaying.track;
+    let pos = 0, dur = prev.duration || 0;
+    try {
+      if (prev.videoId && !prev.audioUrl && window.__ytState) { pos = window.__ytState.current || 0; dur = window.__ytState.duration || dur; }
+      else if (typeof audio !== "undefined" && audio) pos = audio.currentTime || 0;
+    } catch {}
+    const type = dur && pos >= dur * 0.8 ? "finish" : pos < 30 ? "skip" : "partial";
+    recordRec({ type, id: prev.id, channel: prev.artist, listenedSec: Math.round(pos), durationSec: Math.round(dur) });
+    currentPlaying = null;
+  }
+  function playRecommendedNext() {
+    return (async () => {
+      try {
+        const cur = typeof queue !== "undefined" && typeof currentIndex !== "undefined" ? queue[currentIndex] : null;
+        if (!cur) { nextTrack(); return; }
+        // 1. Markov: what did this user actually play after this song before?
+        const transitions = new Map();
+        for (let i = 0; i + 1 < recEvents.length; i++) {
+          if (recEvents[i].type === "play" && recEvents[i].id === cur.id && recEvents[i + 1].type === "play") {
+            transitions.set(recEvents[i + 1].id, (transitions.get(recEvents[i + 1].id) || 0) + 1);
+          }
+        }
+        const markovId = [...transitions.entries()].sort((a, b) => b[1] - a[1])[0];
+        if (markovId && poolById.has(markovId[0])) { window.MyMusicAPI.playTrack(poolById.get(markovId[0])); return; }
+        // 2. Best scored pool track not just played
+        const mixes = buildMixes();
+        const candidate = mixes.recommended.find((tr) => String(tr.id) !== String(cur.id));
+        if (candidate) { window.MyMusicAPI.playTrack(candidate); return; }
+        // 3. YouTube related = co-listening proxy
+        if (cur.videoId) {
+          const res = await fetch(`/api/related/${encodeURIComponent(cur.videoId)}`);
+          const data = await res.json();
+          const items = (data.items || []).map(mapItem);
+          items.forEach((tr) => poolById.set(tr.id, tr));
+          if (items.length) { window.MyMusicAPI.playTrack(items[0]); return; }
+        }
+      } catch {}
+      nextTrack();
+    })();
+  }
+  window.__playRecommendedNext = playRecommendedNext;
+
   let currentTracks = [];
   function setCatalogFor(tracks, opts = {}) {
     currentTracks = tracks;
+    tracks.forEach((tr) => poolById.set(tr.id, tr));
     API.setCatalog({
       tracks,
       albums: opts.albums || [],
@@ -110,6 +261,7 @@
       moods: [],
       likedIds: opts.likedIds || localSaved().map((t) => t.id),
     });
+    updateRecommendations();
   }
 
   async function loadTrending() {
@@ -146,6 +298,13 @@
   API.on("onTrackPlay", (track) => {
     if (track && track.videoId && !track.audioUrl) ytLoad(track.videoId);
     else ytStop();
+    if (track) {
+      finishPreviousTrack();
+      recordRec({ type: "play", id: track.id, channel: track.artist });
+      currentPlaying = { track, at: Date.now() };
+      poolById.set(track.id, track);
+      updateRecommendations();
+    }
   });
   function bindPlayPauseSync() {
     const btn = document.getElementById("play-pause-btn");
@@ -201,6 +360,7 @@
   // ---- MyMusicAPI event wiring ----
   let searchTimer = null;
   API.on("onSearch", (q) => {
+    if (q) recordRec({ type: "search", query: q });
     clearTimeout(searchTimer);
     if (!q) { loadTrending(); return; }
     searchTimer = setTimeout(async () => {
@@ -215,6 +375,8 @@
     }, 350);
   });
   API.on("onLikeToggle", ({ id, liked }) => {
+    recordRec({ type: liked ? "like" : "unlike", id });
+    updateRecommendations();
     if (liked) {
       const track = currentTracks.find((t) => String(t.id) === String(id));
       if (track) saveLocal(track);
