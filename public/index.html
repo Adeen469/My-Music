@@ -1096,6 +1096,25 @@
 
       emitEvent('onTrackPlay', track);
       loadTrackUI(track);
+
+      // Like YouTube Music: playing a song IS opening its page. Update
+      // the URL to /song/<id> with pushState (no reload, so the bottom
+      // player keeps playing) and show the song page. Back returns to
+      // the previous page. Already on that song's page: stay put.
+      if (!(routePage && routePage.type === 'song' && String(routePage.id) === String(track.id))) {
+        if (drawerOpen) toggleDrawer();
+        routePage = { type: 'song', id: track.id };
+        currentView = 'song';
+        if (!(routeData.song && String(routeData.song.id) === String(track.id))) {
+          routeData = { song: track, related: routeData.related || [], artistTracks: [], artistName: track.artist || '' };
+        }
+        routeLoading = false;
+        const path = songUrl(track.id);
+        if (location.pathname !== path) history.pushState({}, '', path);
+        updateNavButtons('song');
+        renderContent();
+        window.dispatchEvent(new CustomEvent('myMusicRoute', { detail: routePage }));
+      }
     }
 
     function loadTrackUI(track) {

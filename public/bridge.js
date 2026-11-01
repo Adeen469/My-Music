@@ -115,7 +115,13 @@
     if (!route) return;
     try {
       if (route.type === "song") {
-        routeLoading = true; renderContent();
+        // File tracks are local only: no YouTube lookup, and no error
+        // toast. The song page already has the track from the player.
+        if (String(route.id).startsWith("file-")) { routeLoading = false; renderContent(); return; }
+        // If the player just navigated here, the song is already known:
+        // fetch Related in the background without flashing a loading page.
+        const alreadyKnown = routeData.song && String(routeData.song.id) === String(route.id);
+        if (!alreadyKnown) { routeLoading = true; renderContent(); }
         const [videoRes, relatedRes] = await Promise.all([
           fetch(`/api/video/${encodeURIComponent(route.id)}`),
           fetch(`/api/related/${encodeURIComponent(route.id)}`),
