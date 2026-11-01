@@ -188,7 +188,11 @@
   </header>
 
   <!-- ================= MAIN WORKSPACE ================= -->
-  <div class="flex flex-1 overflow-hidden relative z-10">
+  <!-- NOTE: no z-index here on purpose. The old z-10 created a stacking
+       context that capped the sidebar (z-50) below the backdrop (z-40),
+       so the backdrop covered the open drawer and swallowed every tap
+       on Home/Explore/Library/X. Without it, sidebar z-50 > backdrop z-40. -->
+  <div class="flex flex-1 overflow-hidden relative">
     
     <!-- LEFT SIDEBAR (Slide-over drawer on mobile, collapsible rail on desktop) -->
     <aside id="sidebar" class="fixed md:static inset-y-0 left-0 w-64 md:w-60 -translate-x-full md:translate-x-0 flex-shrink-0 flex flex-col justify-between py-3 px-3 select-none transition-all duration-200 overflow-y-auto no-scrollbar border-r border-white/5 bg-[#030303] md:bg-[#030303]/60 backdrop-blur-md z-50 md:z-20">
