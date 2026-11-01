@@ -105,6 +105,158 @@
     localStorage.setItem("my_music_saved_tracks", JSON.stringify(list));
   }
 
+  // ---- OFFLINE FILES (2026-11-01, user request) ----
+  // "Users can save any file offline (download) in their browser."
+  // Audio bytes live in IndexedDB in THIS browser only — they are
+  // never uploaded, never synced to another device, and are lost if
+  // site data is cleared. That is also why this is safe for file
+  // tracks only: a YouTube song has no file to save, and extracting
+  // a YouTube stream is never done here. For a YouTube track, Save
+  // offline only works if that track already carries the user's own
+  // / licensed direct file link (downloadUrl); otherwise the user
+  // is told to add their own audio file in Library > Offline.
+  const OFFLINE_DB = "my_music_offline", OFFLINE_STORE = "files";
+  window.__offlineFiles = [];
+  const __offlineBlobUrls = new Map();
+  function openOfflineDB() {
+    return new Promise((resolve, reject) => {
+      if (!("indexedDB" in window)) { reject(new Error("This browser does not support offline storage")); return; }
+      const req = indexedDB.open(OFFLINE_DB, 1);
+      req.onupgradeneeded = () => { try { req.result.createObjectStore(OFFLINE_STORE, { keyPath: "id" }); } catch {} };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error || new Error("Could not open offline storage"));
+    });
+  }
+  function offlineTx(db, mode, fn) {
+    return new Promise((resolve, reject) => {
+      try {
+        const tx = db.transaction(OFFLINE_STORE, mode);
+        const req = fn(tx.objectStore(OFFLINE_STORE));
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error || new Error("Offline storage failed"));
+      } catch (e) { reject(e); }
+    });
+  }
+  async function offlinePut(rec) {
+    const db = await openOfflineDB();
+    try { await offlineTx(db, "readwrite", (s) => s.put(rec)); } finally { try { db.close(); } catch {} }
+  }
+  async function offlineGet(id) {
+    const db = await openOfflineDB();
+    try { return await offlineTx(db, "readonly", (s) => s.get(id)); } finally { try { db.close(); } catch {} }
+  }
+  async function offlineDelete(id) {
+    const db = await openOfflineDB();
+    try { await offlineTx(db, "readwrite", (s) => s.delete(id)); } finally { try { db.close(); } catch {} }
+  }
+  async function offlineListAll() {
+    const db = await openOfflineDB();
+    try { return await offlineTx(db, "readonly", (s) => s.getAll()); } finally { try { db.close(); } catch {} }
+  }
+  async function loadOfflineFiles() {
+    try {
+      const rows = await offlineListAll();
+      window.__offlineFiles = (rows || []).map((r) => ({ id: r.id, title: r.title, artist: r.artist, cover: r.cover || "", size: r.blob ? r.blob.size : 0, source: r.source || "upload", createdAt: r.createdAt || 0 }));
+    } catch { window.__offlineFiles = []; }
+    return window.__offlineFiles;
+  }
+  async function offlineBlobUrl(id) {
+    if (__offlineBlobUrls.has(id)) return __offlineBlobUrls.get(id);
+    const rec = await offlineGet(id);
+    if (!rec || !rec.blob) return null;
+    const url = URL.createObjectURL(rec.blob);
+    __offlineBlobUrls.set(id, url);
+    return url;
+  }
+  async function saveBlobOffline({ id, title, artist, cover, blob, source }) {
+    if (!blob) throw new Error("No audio file to save");
+    await offlinePut({ id, title: title || "Untitled", artist: artist || "", cover: cover || "", blob, source: source || "upload", createdAt: Date.now() });
+    await loadOfflineFiles();
+  }
+  window.__saveOfflineFileFromInput = async () => {
+    const input = document.getElementById("offline-file-input");
+    const file = input && input.files && input.files[0];
+    if (!file) { API.notify("Choose an audio file first"); return; }
+    if (!file.type.startsWith("audio/") && !/\.(mp3|m4a|wav|ogg|flac|aac)$/i.test(file.name)) {
+      API.notify("That does not look like an audio file");
+      return;
+    }
+    try {
+      const id = `file-${Date.now()}`;
+      const title = file.name.replace(/\.[^.]+$/, "");
+      await saveBlobOffline({ id, title, artist: "", cover: "", blob: file, source: "upload" });
+      const files = localFiles();
+      if (!files.some((t) => String(t.id) === String(id))) files.push({ id, title, channel: "", thumbnail: "", downloadUrl: null });
+      localStorage.setItem("my_music_file_tracks", JSON.stringify(files));
+      if (input) input.value = "";
+      API.notify(`Saved "${title}" offline in this browser`);
+      if (typeof renderContent === "function") { try { renderContent(); } catch {} }
+    } catch (e) { API.notify(e.message || "Could not save this file offline"); }
+  };
+  window.__saveTrackOffline = async (trackId) => {
+    try {
+      const track = (typeof poolById !== "undefined" && poolById.get(trackId))
+        || (typeof currentTracks !== "undefined" && currentTracks.find((t) => String(t.id) === String(trackId)))
+        || (typeof state !== "undefined" && state.tracks.find((t) => String(t.id) === String(trackId)));
+      if (!track) { API.notify("Song not found"); return; }
+      const existing = await offlineGet(trackId).catch(() => null);
+      if (existing && existing.blob) { API.notify("Already saved offline"); return; }
+      const link = track.downloadUrl || track.audioUrl;
+      if (!link || !/^https?:\/\//i.test(link)) {
+        API.notify("YouTube songs cannot be saved offline from YouTube. Add your own audio file in Library > Offline, or save a track that already has your own file link.");
+        return;
+      }
+      if (link.startsWith("blob:")) { API.notify("This file is already in this browser"); return; }
+      API.notify("Downloading file for offline use…");
+      const res = await fetch(link);
+      if (!res.ok) throw new Error("Could not download that file");
+      const blob = await res.blob();
+      await saveBlobOffline({ id: trackId, title: track.title, artist: track.artist || "", cover: track.cover || "", blob, source: "link" });
+      API.notify(`Saved "${track.title}" offline in this browser`);
+      if (typeof renderContent === "function") { try { renderContent(); } catch {} }
+    } catch (e) {
+      API.notify("That file host blocked the download. Pick the file from your device instead, in Library > Offline.");
+    }
+  };
+  window.__saveCurrentTrackOffline = async () => {
+    try {
+      const cur = (typeof queue !== "undefined" && typeof currentIndex !== "undefined") ? queue[currentIndex] : null;
+      if (!cur) { API.notify("No track is playing"); return; }
+      await window.__saveTrackOffline(cur.id);
+    } catch { API.notify("Could not save this track offline"); }
+  };
+  window.__playOfflineFile = async (id) => {
+    try {
+      const url = await offlineBlobUrl(id);
+      if (!url) { API.notify("Offline file not found"); return; }
+      const meta = (window.__offlineFiles || []).find((f) => String(f.id) === String(id)) || {};
+      window.MyMusicAPI.playTrack({ id, title: meta.title || "Offline file", artist: meta.artist || "", album: meta.artist || "", cover: meta.cover || "", audioUrl: url, videoId: null, duration: 0 });
+    } catch { API.notify("Could not play this offline file"); }
+  };
+  window.__downloadOfflineFile = async (id) => {
+    try {
+      const rec = await offlineGet(id);
+      if (!rec || !rec.blob) { API.notify("Offline file not found"); return; }
+      const url = URL.createObjectURL(rec.blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = `${(rec.title || "song").replace(/[\\/:*?"<>|]/g, "") || "song"}.mp3`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      API.notify("Download started");
+    } catch { API.notify("Could not download this file"); }
+  };
+  window.__deleteOfflineFile = async (id) => {
+    try {
+      await offlineDelete(id);
+      __offlineBlobUrls.delete(id);
+      const files = localFiles().filter((t) => String(t.id) !== String(id));
+      localStorage.setItem("my_music_file_tracks", JSON.stringify(files));
+      await loadOfflineFiles();
+      API.notify("Offline file deleted");
+      if (typeof renderContent === "function") { try { renderContent(); } catch {} }
+    } catch { API.notify("Could not delete this offline file"); }
+  };
+
   // ---- RECOMMENDATION ENGINE (local, personal, no account) ----
   // Honest limits, by design: Google sign-in is disabled and the YouTube
   // Data API key cannot read the user's private YouTube watch history,
@@ -360,7 +512,27 @@
     } finally { API.setLoading(false); }
   }
   async function loadLibrary() {
-    const saved = [...localSaved(), ...localFiles()].map((t) => mapItem({ id: t.id, title: t.title, channel: t.channel, thumbnail: t.thumbnail, downloadUrl: t.downloadUrl || null }));
+    await loadOfflineFiles().catch(() => {});
+    const raw = [...localSaved(), ...localFiles()];
+    const saved = [];
+    for (const t of raw) {
+      const item = mapItem({ id: t.id, title: t.title, channel: t.channel, thumbnail: t.thumbnail, downloadUrl: t.downloadUrl || null });
+      // Offline copy wins: if this track is saved in IndexedDB, it
+      // plays from the local blob even with no internet.
+      try {
+        const url = await offlineBlobUrl(t.id).catch(() => null);
+        if (url) { item.audioUrl = url; item.videoId = null; }
+      } catch {}
+      saved.push(item);
+    }
+    // Uploaded offline files are in localFiles already, but also
+    // include any IndexedDB file whose metadata entry was lost.
+    for (const f of window.__offlineFiles || []) {
+      if (!saved.some((t) => String(t.id) === String(f.id))) {
+        const url = await offlineBlobUrl(f.id).catch(() => null);
+        if (url) saved.push({ id: f.id, title: f.title, artist: f.artist, album: f.artist, cover: f.cover, audioUrl: url, videoId: null, downloadUrl: null, duration: 0 });
+      }
+    }
     setCatalogFor(saved, { likedIds: saved.map((t) => t.id) });
   }
 
@@ -651,6 +823,7 @@
     // the public list (including the just-synced ones) for the sidebar.
     await syncPublicPlaylists();
     await loadPublicPlaylists();
+    await loadOfflineFiles().catch(() => {});
     try {
       const health = await (await fetch("/api/health")).json();
       if (!health.youtubeConfigured) API.notify("YouTube API is not connected yet: set YOUTUBE_API_KEY in Vercel env vars, then redeploy. No sample songs are shown.");

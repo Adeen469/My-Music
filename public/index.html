@@ -388,6 +388,9 @@
       <button id="shuffle-btn" onclick="shuffleQueue()" class="p-2 rounded-full hover:bg-white/10 text-zinc-400 hidden md:flex items-center justify-center transition" title="Shuffle">
         <span class="material-symbols-outlined text-xl">shuffle</span>
       </button>
+      <button onclick="if (window.__saveCurrentTrackOffline) window.__saveCurrentTrackOffline()" class="p-2 rounded-full hover:bg-white/10 text-zinc-400 flex items-center justify-center transition" title="Save current track offline">
+        <span class="material-symbols-outlined text-xl">download</span>
+      </button>
       <button id="drawer-toggle-btn" onclick="toggleDrawer()" class="p-1.5 sm:p-2 rounded-full hover:bg-white/10 text-white flex items-center justify-center transition" title="Toggle Player Drawer">
         <span id="drawer-caret" class="material-symbols-outlined text-2xl transition-transform duration-300">arrow_drop_up</span>
       </button>
@@ -1132,12 +1135,39 @@
 
     function renderLibraryView() {
       const likedTracks = state.tracks.filter(t => state.likedIds.has(t.id));
-      if (!likedTracks.length && !state.playlists.length) {
-        return renderEmptyState('library_music', 'Your Library is empty', 'Liked songs and user playlists from your backend will appear here.');
-      }
+      const offlineFiles = window.__offlineFiles || [];
+      const fmtSize = (n) => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
       return `
         <div class="space-y-8">
           <h2 class="text-2xl sm:text-3xl font-bold">Your Library</h2>
+          <div>
+            <h3 class="text-base sm:text-lg font-medium text-zinc-300 mb-1">Offline — saved in this browser</h3>
+            <p class="text-xs text-zinc-500 mb-3">Pick any audio file from your device and save it here, or tap Save offline on a track that already has your own file link. Offline files play without internet, on this device and browser only — they are not synced to other devices, and clearing site data deletes them. YouTube songs cannot be saved offline from YouTube.</p>
+            <div class="flex flex-wrap items-center gap-2 mb-4">
+              <input type="file" id="offline-file-input" accept="audio/*" class="text-xs text-zinc-400 max-w-full" />
+              <button onclick="if (window.__saveOfflineFileFromInput) window.__saveOfflineFileFromInput()" class="px-4 py-2 rounded-full bg-white text-black font-medium text-sm">Save this file offline</button>
+            </div>
+            ${!offlineFiles.length ? `<div class="text-sm text-zinc-500 py-4">No offline files yet.</div>` : `
+              <div class="divide-y divide-white/5 border-t border-b border-white/10">
+                ${offlineFiles.map(f => `
+                  <div class="flex items-center justify-between py-2.5 px-2 hover:bg-white/5 transition">
+                    <div class="flex items-center gap-3 overflow-hidden">
+                      <span class="material-symbols-outlined text-zinc-400">download_done</span>
+                      <div class="overflow-hidden">
+                        <div class="text-sm font-medium text-white truncate">${escapeHtml(f.title)}</div>
+                        <div class="text-xs text-zinc-400 truncate">${escapeHtml(f.artist || '')} • ${fmtSize(f.size)}</div>
+                      </div>
+                    </div>
+                    <div class="flex items-center gap-1 flex-shrink-0">
+                      <button onclick="if (window.__playOfflineFile) window.__playOfflineFile('${f.id}')" class="p-2 rounded-full hover:bg-white/10 text-white" title="Play offline"><span class="material-symbols-outlined text-lg">play_arrow</span></button>
+                      <button onclick="if (window.__downloadOfflineFile) window.__downloadOfflineFile('${f.id}')" class="p-2 rounded-full hover:bg-white/10 text-zinc-300" title="Download to device"><span class="material-symbols-outlined text-lg">download</span></button>
+                      <button onclick="if (confirm('Delete this offline file?')) window.__deleteOfflineFile('${f.id}')" class="p-2 rounded-full hover:bg-white/10 text-zinc-300" title="Delete offline file"><span class="material-symbols-outlined text-lg">delete</span></button>
+                    </div>
+                  </div>
+                `).join('')}
+              </div>
+            `}
+          </div>
           <div>
             <h3 class="text-base sm:text-lg font-medium text-zinc-300 mb-3">Liked Music (${likedTracks.length})</h3>
             ${!likedTracks.length ? `<div class="text-sm text-zinc-500 py-6">No liked songs yet.</div>` : `
@@ -1154,6 +1184,9 @@
                       </div>
                     </div>
                     <div class="flex items-center gap-3">
+                      <button onclick="event.stopPropagation(); if (window.__saveTrackOffline) window.__saveTrackOffline('${track.id}')" class="text-zinc-300 hover:text-white" title="Save offline">
+                        <span class="material-symbols-outlined text-lg">download</span>
+                      </button>
                       <button onclick="event.stopPropagation(); toggleLikeById('${track.id}')" class="text-white">
                         <span class="material-symbols-outlined filled text-lg">thumb_up</span>
                       </button>
