@@ -34,3 +34,31 @@ create table if not exists public.my_music_users (
   created_at timestamptz not null default now(),
   approved_at timestamptz
 );
+
+-- My Music — server playlists for public sharing (added 2026-11-01).
+-- Before this, playlists lived only in browser localStorage, so a
+-- "Public" playlist could never be seen by another user. Now a
+-- playlist marked Public is stored here and readable by ANY user
+-- (signed in or not) through the server API. Private playlists are
+-- never stored here. File tracks are never synced (only YouTube
+-- tracks, whose links are public anyway). No sample rows.
+create table if not exists public.my_music_playlists (
+  id bigint generated always as identity primary key,
+  owner_email text not null,
+  owner_name text not null default '',
+  name text not null,
+  visibility text not null default 'public' check (visibility in ('public', 'private')),
+  created_at timestamptz not null default now(),
+  unique (owner_email, name)
+);
+create table if not exists public.my_music_playlist_tracks (
+  id bigint generated always as identity primary key,
+  playlist_id bigint not null references public.my_music_playlists (id) on delete cascade,
+  video_id text not null,
+  title text not null default '',
+  channel text not null default '',
+  thumbnail text not null default '',
+  duration_seconds integer not null default 0,
+  position integer not null default 0,
+  created_at timestamptz not null default now()
+);

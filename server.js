@@ -538,6 +538,118 @@ async function requireApprovedUser(req, res, next) {
   next();
 }
 
+// ---- Server playlists: public sharing (2026-11-01, user request) ----
+// Before this, playlists lived only in browser localStorage, so a
+// "Public" playlist was public in name only — no other user or
+// device could ever see it. Now a playlist marked Public is stored
+// on the server (Supabase) and is readable by ANY user, signed in
+// or not, via GET /api/playlists/public and /api/playlists/:id.
+// Private playlists are never stored here: the bridge only syncs
+// public ones, and toggling to private deletes the server copy.
+// Writing (create/update/delete) still requires an approved Google
+// session, and only the owner can change or delete their playlist.
+// File tracks are never shared: only YouTube tracks are synced,
+// because a file track's link is the owner's own file.
+function mapPlaylistTrack(r) {
+  return {
+    id: r.video_id, videoId: r.video_id, title: r.title || "", artist: r.channel || "",
+    channel: r.channel || "", cover: r.thumbnail || "", thumbnail: r.thumbnail || "",
+    duration: r.duration_seconds || 0, audioUrl: null,
+  };
+}
+app.post("/api/playlists", requireApprovedUser, async (req, res) => {
+  const name = String((req.body && req.body.name) || "").trim();
+  const visibility = (req.body && req.body.visibility) === "public" ? "public" : "private";
+  const owner = req.approvedUser;
+  if (!name) return res.status(400).json({ error: "Playlist name is required" });
+  try {
+    const existing = await supabaseFetch(
+      `my_music_playlists?select=*&owner_email=eq.${encodeURIComponent(owner.email)}&name=eq.${encodeURIComponent(name)}`
+    );
+    const old = (existing || [])[0] || null;
+    if (visibility !== "public") {
+      // Private = not on the server at all.
+      if (old) {
+        await supabaseFetch(`my_music_playlist_tracks?playlist_id=eq.${old.id}`, "DELETE");
+        await supabaseFetch(`my_music_playlists?id=eq.${old.id}`, "DELETE");
+      }
+      return res.json({ ok: true, stored: false });
+    }
+    const tracks = ((req.body && req.body.tracks) || [])
+      .filter((t) => t && t.id && !String(t.id).startsWith("file-"))
+      .map((t, i) => ({
+        video_id: t.videoId || t.id, title: t.title || "", channel: t.artist || t.channel || "",
+        thumbnail: t.cover || t.thumbnail || "", duration_seconds: Math.floor(t.duration || t.durationSeconds || 0) || 0,
+        position: i,
+      }));
+    let playlistId;
+    if (old) {
+      playlistId = old.id;
+      await supabaseFetch(`my_music_playlists?id=eq.${playlistId}`, "PATCH", { name, visibility: "public", owner_name: owner.name || "" });
+      await supabaseFetch(`my_music_playlist_tracks?playlist_id=eq.${playlistId}`, "DELETE");
+    } else {
+      const created = await supabaseFetch("my_music_playlists", "POST", {
+        owner_email: owner.email, owner_name: owner.name || "", name, visibility: "public",
+      });
+      playlistId = (Array.isArray(created) ? created[0] : created) && (Array.isArray(created) ? created[0].id : created.id);
+      if (!playlistId) throw new Error("Could not create playlist on the server");
+    }
+    if (tracks.length) {
+      await supabaseFetch("my_music_playlist_tracks", "POST", tracks.map((t) => ({ ...t, playlist_id: playlistId })));
+    }
+    res.json({ ok: true, stored: true, id: playlistId, name, visibility: "public" });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message });
+  }
+});
+app.delete("/api/playlists/:id", requireApprovedUser, async (req, res) => {
+  try {
+    const rows = await supabaseFetch(`my_music_playlists?select=*&id=eq.${encodeURIComponent(req.params.id)}`);
+    const pl = (rows || [])[0];
+    if (!pl) return res.status(404).json({ error: "Playlist not found" });
+    if (pl.owner_email.toLowerCase() !== req.approvedUser.email.toLowerCase()) {
+      return res.status(403).json({ error: "Only the owner can delete this playlist" });
+    }
+    await supabaseFetch(`my_music_playlist_tracks?playlist_id=eq.${pl.id}`, "DELETE");
+    await supabaseFetch(`my_music_playlists?id=eq.${pl.id}`, "DELETE");
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message });
+  }
+});
+app.get("/api/playlists/public", async (req, res) => {
+  try {
+    const rows = await supabaseFetch("my_music_playlists?select=id,owner_email,owner_name,name,visibility,created_at&visibility=eq.public&order=created_at.desc&limit=100");
+    const list = rows || [];
+    let counts = {};
+    if (list.length) {
+      const ids = list.map((p) => p.id).join(",");
+      const trackRows = await supabaseFetch(`my_music_playlist_tracks?select=playlist_id&playlist_id=in.(${ids})&limit=1000`);
+      for (const t of trackRows || []) counts[t.playlist_id] = (counts[t.playlist_id] || 0) + 1;
+    }
+    res.json({ playlists: list.map((p) => ({ ...p, track_count: counts[p.id] || 0 })) });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message });
+  }
+});
+app.get("/api/playlists/:id", async (req, res) => {
+  try {
+    const rows = await supabaseFetch(`my_music_playlists?select=*&id=eq.${encodeURIComponent(req.params.id)}`);
+    const pl = (rows || [])[0];
+    if (!pl) return res.status(404).json({ error: "Playlist not found" });
+    if (pl.visibility !== "public") {
+      const user = getUser(req);
+      if (!user || !user.email || user.email.toLowerCase() !== String(pl.owner_email).toLowerCase()) {
+        return res.status(404).json({ error: "Playlist not found" });
+      }
+    }
+    const trackRows = await supabaseFetch(`my_music_playlist_tracks?select=*&playlist_id=eq.${pl.id}&order=position.asc`);
+    res.json({ id: pl.id, name: pl.name, owner_email: pl.owner_email, owner_name: pl.owner_name, visibility: pl.visibility, tracks: (trackRows || []).map(mapPlaylistTrack) });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message });
+  }
+});
+
 // ---- Admin panel (/admin) ----
 // Stateless signed session: the cookie holds {email, exp} plus an
 // HMAC made with ADMIN_PASSWORD, so it works across serverless

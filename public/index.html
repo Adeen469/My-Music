@@ -720,6 +720,19 @@
           <span class="material-symbols-outlined">login</span> Sign in with Google
         </a>
         <p class="text-zinc-600 text-xs mt-6">New here? Signing in for the first time creates your registration request.</p>
+        ${(() => {
+          const pubs = window.__publicPlaylists || [];
+          if (!pubs.length) return `<p class="text-zinc-600 text-xs mt-10">Public playlists shared by users will appear here.</p>`;
+          return `<div class="w-full max-w-md mt-10 text-left">
+            <h2 class="text-lg font-semibold text-white mb-3">Public playlists — open to anyone</h2>
+            <div class="space-y-2">
+              ${pubs.map(p => `<button onclick="goTo('/playlist/${p.id}')" class="w-full flex items-center justify-between px-4 py-3 rounded-xl bg-white/5 hover:bg-white/10 text-left transition">
+                <span class="overflow-hidden"><span class="block text-sm font-medium text-white truncate">${escapeHtml(p.name)}</span><span class="block text-xs text-zinc-400 truncate">${p.owner_name ? escapeHtml(p.owner_name) + ' • ' : ''}${p.track_count} song${p.track_count === 1 ? '' : 's'}</span></span>
+                <span class="material-symbols-outlined text-zinc-400">play_circle</span>
+              </button>`).join('')}
+            </div>
+          </div>`;
+        })()}
       </div>`;
     }
     function renderPendingView() {
@@ -803,7 +816,8 @@
         window.__deepLinkSongId = deepLinkSongId;
         currentView = 'home';
         if (location.pathname !== '/' || location.search) history.replaceState({}, '', '/');
-      } else if (path.startsWith('/artist/')) { routePage = { type: 'artist', name: decodeURIComponent(path.slice(8)) }; currentView = 'artist'; routeLoading = true; }
+      } else if (path.startsWith('/playlist/')) { routePage = { type: 'publicPlaylist', id: decodeURIComponent(path.slice(10)) }; currentView = 'publicPlaylist'; routeLoading = true; }
+      else if (path.startsWith('/artist/')) { routePage = { type: 'artist', name: decodeURIComponent(path.slice(8)) }; currentView = 'artist'; routeLoading = true; }
       else if (path === '/profile') { routePage = { type: 'profile' }; currentView = 'profile'; }
       else if (path === '/explore') { currentView = 'explore'; }
       else if (path === '/library') { currentView = 'library'; }
@@ -943,6 +957,7 @@
       // through to Home instead of ever rendering a song page.
       if (currentView === 'landing') { container.innerHTML = renderLandingView(); return; }
       if (currentView === 'pending') { container.innerHTML = renderPendingView(); return; }
+      if (routePage && routePage.type === 'publicPlaylist') { container.innerHTML = renderPublicPlaylistView(); return; }
       if (routePage && routePage.type === 'playlist') { container.innerHTML = renderPlaylistView(); return; }
       if (routePage && routePage.type === 'artist') { container.innerHTML = renderArtistView(); return; }
       if (routePage && routePage.type === 'profile') { container.innerHTML = renderProfileView(); return; }
@@ -1180,6 +1195,96 @@
       startPlayback(queue[0]);
     }
 
+    // PUBLIC PLAYLIST (2026-11-01): a playlist marked Public lives on
+    // the server and can be opened by ANY user, signed in or not.
+    // This view is the one exception to the approval gate: it shows
+    // only this playlist's tracks, not trending, search or Library.
+    function showPublicPlaylist(id) {
+      routePage = { type: 'publicPlaylist', id: String(id) };
+      currentView = 'publicPlaylist';
+      closeMobileSidebar();
+      updateNavButtons('publicPlaylist');
+      const path = '/playlist/' + encodeURIComponent(id);
+      if (location.pathname !== path) history.pushState({}, '', path);
+      routeData.publicPlaylist = null;
+      routeLoading = true;
+      renderContent();
+      fetch('/api/playlists/' + encodeURIComponent(id)).then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Playlist not found');
+        routeData.publicPlaylist = data;
+        routeLoading = false;
+        renderContent();
+      }).catch((e) => {
+        routeLoading = false;
+        routeData.publicPlaylist = { error: e.message || 'Playlist not found' };
+        renderContent();
+      });
+    }
+    window.showPublicPlaylist = showPublicPlaylist;
+    function playPublicPlaylistAll() {
+      const pl = routeData.publicPlaylist;
+      const tracks = (pl && pl.tracks) || [];
+      if (!tracks.length) { showToast('This playlist is empty'); return; }
+      queue = [...tracks];
+      currentIndex = 0;
+      startPlayback(queue[0]);
+    }
+    function playPublicPlaylistTrack(trackId) {
+      const pl = routeData.publicPlaylist;
+      const tracks = (pl && pl.tracks) || [];
+      const idx = tracks.findIndex(t => String(t.id) === String(trackId));
+      if (idx === -1) return;
+      queue = [...tracks];
+      currentIndex = idx;
+      startPlayback(queue[currentIndex]);
+    }
+    function renderPublicPlaylistView() {
+      if (routeLoading) return `<div class="py-20 text-center text-sm text-zinc-500">Loading playlist…</div>`;
+      const pl = routeData.publicPlaylist;
+      if (!pl || pl.error) return renderEmptyState('playlist_add', 'Playlist not found', (pl && pl.error) || 'This playlist may have been deleted or made private.');
+      const tracks = pl.tracks || [];
+      const isApproved = typeof window.__currentUser !== 'undefined' && !!window.__currentUser;
+      return `
+        <div class="space-y-8">
+          <div class="flex items-start gap-4">
+            <div class="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-red-600 flex items-center justify-center flex-shrink-0">
+              <span class="material-symbols-outlined text-white text-3xl filled">play_arrow</span>
+            </div>
+            <div class="min-w-0">
+              <h2 class="text-2xl sm:text-3xl font-bold truncate">${escapeHtml(pl.name)}</h2>
+              <p class="text-sm text-zinc-400 mt-1 flex items-center gap-1.5">
+                <span class="material-symbols-outlined text-base">public</span>
+                Public playlist • ${tracks.length} song${tracks.length === 1 ? '' : 's'}${pl.owner_name ? ` • by ${escapeHtml(pl.owner_name)}` : ''}
+              </p>
+              <p class="text-xs text-zinc-500 mt-1">Anyone can open this playlist. The rest of My Music needs admin approval.</p>
+            </div>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <button onclick="playPublicPlaylistAll()" class="px-5 py-2.5 rounded-full bg-white text-black font-medium text-sm">Play all</button>
+            ${isApproved ? `<button onclick="if (window.__savePublicPlaylistCopy) window.__savePublicPlaylistCopy()" class="px-4 py-2.5 rounded-full border border-white/20 hover:bg-white/10 text-sm">Save a copy to my playlists</button>` : `<a href="/auth/google" class="px-4 py-2.5 rounded-full border border-white/20 hover:bg-white/10 text-sm">Sign in to save a copy</a>`}
+          </div>
+          ${!tracks.length ? `<div class="text-sm text-zinc-500 py-6">This playlist has no songs yet.</div>` : `
+            <div class="divide-y divide-white/5 border-t border-b border-white/10">
+              ${tracks.map(track => `
+                <div onclick="playPublicPlaylistTrack('${track.id}')" class="flex items-center justify-between py-2.5 px-2 hover:bg-white/5 cursor-pointer transition">
+                  <div class="flex items-center gap-3 sm:gap-4 overflow-hidden">
+                    <div class="w-10 h-10 rounded overflow-hidden bg-zinc-800 flex-shrink-0">
+                      ${track.cover ? `<img src="${track.cover}" class="w-full h-full object-cover" />` : ''}
+                    </div>
+                    <div class="overflow-hidden">
+                      <div class="text-sm font-medium text-white truncate">${escapeHtml(track.title)}</div>
+                      <div class="text-xs text-zinc-400 truncate">${escapeHtml(track.artist || '')}</div>
+                    </div>
+                  </div>
+                  <span class="text-xs text-zinc-400 w-10 text-right">${formatTime(track.duration || 0)}</span>
+                </div>
+              `).join('')}
+            </div>
+          `}
+        </div>
+      `;
+    }
     function renderPlaylistView() {
       const pl = state.playlists.find(p => String(p.id) === String(routePage && routePage.id));
       if (!pl) return renderEmptyState('playlist_add', 'Playlist not found', 'This playlist may have been deleted.');
@@ -1194,7 +1299,7 @@
                 <span class="material-symbols-outlined text-base">${pl.visibility === 'public' ? 'public' : 'lock'}</span>
                 ${pl.visibility === 'public' ? 'Public' : 'Private'} playlist • ${tracks.length} song${tracks.length === 1 ? '' : 's'}
               </p>
-              <p class="text-xs text-zinc-500 mt-1">Saved in this browser, like your Library.</p>
+              <p class="text-xs text-zinc-500 mt-1">${pl.visibility === 'public' ? 'Public playlists are stored on the server and can be opened by anyone.' : 'Private playlists stay in this browser, like your Library.'}</p>
             </div>
           </div>
           <div class="flex flex-wrap items-center gap-2">
@@ -1841,7 +1946,7 @@
         <label class="flex items-center gap-2 cursor-pointer"><input type="radio" name="create-playlist-visibility" value="public" id="create-playlist-public" /> Public</label>
         <label class="flex items-center gap-2 cursor-pointer"><input type="radio" name="create-playlist-visibility" value="private" id="create-playlist-private" checked /> Private</label>
       </div>
-      <p class="text-xs text-zinc-500 mt-2">Public or private is saved on the playlist and shown beside its title. Playlists are saved in this browser, like your Library.</p>
+      <p class="text-xs text-zinc-500 mt-2">Public playlists are stored on the server and can be opened by anyone, even without approval. Private playlists stay in this browser only, like your Library.</p>
       <div class="flex justify-end gap-2 mt-5">
         <button onclick="closeCreatePlaylistDialog()" class="px-4 py-2 rounded-full border border-white/20 text-sm">Cancel</button>
         <button onclick="submitCreatePlaylist()" class="px-5 py-2 rounded-full bg-white text-black font-medium text-sm">Create</button>

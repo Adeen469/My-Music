@@ -253,13 +253,12 @@
   // Why "New playlist" never created one before: handleCreatePlaylist
   // only prompted for a name and the old onCreatePlaylist handler just
   // showed a "not saved yet" toast — there was no storage, no server
-  // endpoint and no playlist table anywhere. Playlists now live in
-  // this browser's localStorage, exactly like Saved tracks / Library:
-  // that is why they work immediately with no sign-in and no Supabase
-  // setup, and why a "public" playlist is a saved visibility flag
-  // shown beside its title — it does NOT yet publish the playlist to
-  // other users or devices, because there is no server account behind
-  // it yet. Server sharing would need a playlists table + sign-in.
+  // endpoint and no playlist table anywhere. Playlists still live in
+  // this browser's localStorage, exactly like Saved tracks / Library,
+  // BUT a playlist marked Public is now also synced to the server
+  // (Supabase, /api/playlists) and can be opened by ANY user, signed
+  // in or not, via /playlist/<server id>. Private playlists are
+  // never synced, and toggling to private deletes the server copy.
   const PL_KEY = "my_music_playlists";
   function loadPlaylists() { try { return JSON.parse(localStorage.getItem(PL_KEY) || "[]"); } catch { return []; } }
   function savePlaylists(list) { try { localStorage.setItem(PL_KEY, JSON.stringify(list)); } catch {} }
@@ -270,11 +269,69 @@
       tracks: pl.tracks || [],
     }));
   }
+  function publicPlaylistsForUI() {
+    return (window.__publicPlaylists || []).map((p) => ({
+      id: `public-${p.id}`, name: p.name, visibility: "public",
+      sub: `Public • ${p.track_count} song${p.track_count === 1 ? "" : "s"}${p.owner_name ? ` • by ${p.owner_name}` : ""}`,
+      tracks: [],
+    }));
+  }
   function refreshPlaylistsUI() {
-    const all = [...userPlaylistsForUI(), { id: "saved-tracks", name: "Saved tracks", sub: "Local library (no sign-in)" }];
+    const all = [...userPlaylistsForUI(), ...publicPlaylistsForUI(), { id: "saved-tracks", name: "Saved tracks", sub: "Local library (no sign-in)" }];
     if (typeof API.setPlaylists === "function") API.setPlaylists(all);
     else if (typeof setCatalogFor === "function") setCatalogFor(currentTracks);
   }
+  // PUBLIC PLAYLISTS (2026-11-01): sync local Public playlists to
+  // the server so any user can open them; private ones never leave
+  // this browser, and a previously-public playlist turned private
+  // has its server copy deleted. File tracks are skipped (your own
+  // files are not shared). Runs for approved users only.
+  async function syncPublicPlaylists() {
+    if (!window.__currentUser) return;
+    const list = loadPlaylists();
+    let changed = false;
+    for (const pl of list) {
+      try {
+        if (pl.visibility === "public") {
+          const res = await fetch("/api/playlists", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              name: pl.name, visibility: "public",
+              tracks: (pl.tracks || []).map((t) => ({ id: t.id, videoId: t.videoId || t.id, title: t.title, artist: t.artist || t.channel, channel: t.channel || t.artist, cover: t.cover || t.thumbnail, thumbnail: t.thumbnail || t.cover, duration: t.duration || 0 })),
+            }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (res.ok && data.id && pl.serverId !== data.id) { pl.serverId = data.id; changed = true; }
+        } else if (pl.serverId) {
+          await fetch(`/api/playlists/${encodeURIComponent(pl.serverId)}`, { method: "DELETE" });
+          delete pl.serverId; changed = true;
+        }
+      } catch {}
+    }
+    if (changed) savePlaylists(list);
+  }
+  async function loadPublicPlaylists() {
+    try {
+      const res = await fetch("/api/playlists/public");
+      const data = await res.json().catch(() => ({}));
+      window.__publicPlaylists = res.ok ? (data.playlists || []) : [];
+    } catch { window.__publicPlaylists = []; }
+    refreshPlaylistsUI();
+    if (typeof renderContent === "function") {
+      try { if (typeof currentView !== "undefined" && currentView === "landing") renderContent(); } catch {}
+    }
+  }
+  window.__savePublicPlaylistCopy = () => {
+    const pl = (typeof routeData !== "undefined" && routeData.publicPlaylist) || null;
+    if (!pl || !pl.tracks) return;
+    const list = loadPlaylists();
+    let name = pl.name; let n = 2;
+    while (list.some((p) => p.name.toLowerCase() === name.toLowerCase())) name = `${pl.name} (${n++})`;
+    list.push({ id: `pl-${Date.now()}`, name, visibility: "private", tracks: pl.tracks, createdAt: Date.now() });
+    savePlaylists(list);
+    refreshPlaylistsUI();
+    API.notify(`Saved a copy of "${pl.name}" to your playlists`);
+  };
 
   let currentTracks = [];
   function setCatalogFor(tracks, opts = {}) {
@@ -284,7 +341,7 @@
       tracks,
       albums: opts.albums || [],
       artists: artistsFrom(tracks),
-      playlists: opts.playlists || [...userPlaylistsForUI(), { id: "saved-tracks", name: "Saved tracks", sub: "Local library (no sign-in)" }],
+      playlists: opts.playlists || [...userPlaylistsForUI(), ...publicPlaylistsForUI(), { id: "saved-tracks", name: "Saved tracks", sub: "Local library (no sign-in)" }],
       moods: [],
       likedIds: opts.likedIds || localSaved().map((t) => t.id),
     });
@@ -349,6 +406,12 @@
   // can no longer reach here via parseRoute, but if one somehow does,
   // play it on Home instead of ever rendering a song page.
   async function loadRoute(route) {
+    // Public playlist routes are the one exception to the gate:
+    // anyone can open /playlist/<id>, signed in or not.
+    if (route && route.type === "publicPlaylist") {
+      if (typeof window.showPublicPlaylist === "function") window.showPublicPlaylist(route.id);
+      return;
+    }
     // Gated app: once auth has been checked, an unapproved visitor
     // is sent back to the landing page on any route change, including
     // Back to '/' (route = null). Before the check runs,
@@ -415,6 +478,13 @@
     }
   });
   API.on("onPlaylistSelect", (id) => {
+    // Public playlists are open to anyone, even without approval:
+    // a sidebar item with id public-<server id> opens the shared
+    // view, not the local playlist view.
+    if (typeof id === "string" && id.startsWith("public-")) {
+      if (typeof window.showPublicPlaylist === "function") window.showPublicPlaylist(id.slice(7));
+      return;
+    }
     if (!window.__currentUser && typeof window.showLanding === "function") { window.showLanding(); return; }
     const pl = loadPlaylists().find((p) => String(p.id) === String(id));
     if (pl) {
@@ -434,6 +504,7 @@
     if (list.some((p) => p.name.toLowerCase() === name.toLowerCase())) { API.notify(`A playlist called "${name}" already exists`); return; }
     list.push({ id: `pl-${Date.now()}`, name, visibility, tracks: [], createdAt: Date.now() });
     savePlaylists(list);
+    syncPublicPlaylists();
     refreshPlaylistsUI();
     API.notify(`Playlist "${name}" created (${visibility === "public" ? "Public" : "Private"})`);
   });
@@ -457,6 +528,7 @@
     pl.tracks = [...(pl.tracks || []), track];
     savePlaylists(list);
     refreshPlaylistsUI();
+    syncPublicPlaylists();
     API.notify(`Added to "${pl.name}"`);
   });
   API.on("onRemoveFromPlaylist", (input) => {
@@ -466,6 +538,7 @@
     pl.tracks = (pl.tracks || []).filter((t) => String(t.id) !== String(input.trackId));
     savePlaylists(list);
     refreshPlaylistsUI();
+    syncPublicPlaylists();
   });
   API.on("onPlaylistVisibility", (input) => {
     const list = loadPlaylists();
@@ -474,10 +547,13 @@
     pl.visibility = input.visibility === "public" ? "public" : "private";
     savePlaylists(list);
     refreshPlaylistsUI();
+    syncPublicPlaylists();
     API.notify(`"${pl.name}" is now ${pl.visibility}`);
   });
   API.on("onPlaylistDelete", (id) => {
     const playlistId = typeof id === "string" ? id : (id && id.id);
+    const doomed = loadPlaylists().find((p) => String(p.id) === String(playlistId));
+    if (doomed && doomed.serverId) fetch(`/api/playlists/${encodeURIComponent(doomed.serverId)}`, { method: "DELETE" }).catch(() => {});
     savePlaylists(loadPlaylists().filter((p) => String(p.id) !== String(playlistId)));
     refreshPlaylistsUI();
     try {
@@ -542,6 +618,13 @@
     let reg = null;
     try { reg = new URLSearchParams(location.search).get("registration"); } catch {}
     const user = await refreshMe();
+    // Public playlist exception: anyone can open /playlist/<id>,
+    // even without approval — this is checked before the gate.
+    if (typeof routePage !== "undefined" && routePage && routePage.type === "publicPlaylist") {
+      await loadPublicPlaylists();
+      if (typeof window.showPublicPlaylist === "function") window.showPublicPlaylist(routePage.id);
+      return;
+    }
     if (reg === "pending") {
       window.__registrationRejected = false;
       if (typeof window.showPending === "function") window.showPending();
@@ -551,15 +634,23 @@
     if (reg === "rejected" || reg === "removed") {
       window.__registrationRejected = (reg === "rejected");
       if (typeof window.showLanding === "function") window.showLanding();
+      await loadPublicPlaylists();
       API.notify(reg === "rejected" ? "Your registration was not approved by the admin." : "Your account was removed by the admin.");
       return;
     }
     if (!user) {
       window.__registrationRejected = false;
       if (typeof window.showLanding === "function") window.showLanding();
+      await loadPublicPlaylists();
       return;
     }
     // Approved user only from here: the real app.
+    // Sync local Public playlists to the server first, so a
+    // playlist like "fav by error" that was public locally becomes
+    // visible to other users without recreating it, then reload
+    // the public list (including the just-synced ones) for the sidebar.
+    await syncPublicPlaylists();
+    await loadPublicPlaylists();
     try {
       const health = await (await fetch("/api/health")).json();
       if (!health.youtubeConfigured) API.notify("YouTube API is not connected yet: set YOUTUBE_API_KEY in Vercel env vars, then redeploy. No sample songs are shown.");
