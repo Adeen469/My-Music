@@ -151,6 +151,22 @@ app.get("/api/video/:id", async (req, res) => {
   }
 });
 
+app.get("/api/artist/:name", async (req, res) => {
+  const name = (req.params.name || "").trim();
+  if (!name) return res.status(400).json({ error: "Missing artist name" });
+  try {
+    const data = await youtube("search", {
+      part: "snippet", type: "video", q: name, maxResults: "25", order: "relevance",
+    });
+    const all = (data.items || []).map(mapVideo);
+    // Only songs actually by this channel, not just relevance matches.
+    const exact = all.filter((t) => t.channel.toLowerCase() === name.toLowerCase());
+    res.json({ items: exact, searched: all.length, exact: exact.length });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message });
+  }
+});
+
 app.get("/api/related/:id", async (req, res) => {
   try {
     const data = await youtube("search", {
@@ -312,6 +328,13 @@ app.delete("/api/library", async (req, res) => {
   } catch (e) {
     res.status(e.status || 500).json({ error: e.message });
   }
+});
+
+// SPA fallback: /song/:id, /artist/:name, /profile, /explore, /library
+// and /watch?v=:id are all served by the same single-page app, so a
+// shared link or a refresh on one of those pages must not 404.
+app.get(["/explore", "/library", "/profile", "/watch", "/song/*", "/artist/*"], (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
 // Local run: `npm start` listens. On Vercel, api/index.js imports this

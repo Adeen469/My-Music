@@ -416,6 +416,12 @@
     let drawerOpen = false;
     let activeDrawerTab = 'upnext';
     let sidebarCollapsed = false;
+    // --- SEPARATE PAGES (routing, like music.youtube.com) ---
+    // routePage is null on Home/Explore/Library, otherwise one of:
+    // {type:'song', id}, {type:'artist', name}, {type:'profile'}
+    let routePage = null;
+    let routeData = { song: null, related: [], artistTracks: [], artistName: '' };
+    let routeLoading = false;
 
     const audio = document.getElementById('audio-engine');
 
@@ -616,11 +622,7 @@
       }
     }
 
-    function switchView(view) {
-      currentView = view;
-      closeMobileSidebar();
-
-      // Update Desktop Sidebar Buttons
+    function updateNavButtons(view) {
       document.querySelectorAll('.nav-btn').forEach(btn => {
         const isTarget = btn.dataset.nav === view;
         btn.classList.toggle('bg-white/10', isTarget);
@@ -629,8 +631,6 @@
         const icon = btn.querySelector('.material-symbols-outlined');
         if (icon) icon.classList.toggle('filled', isTarget);
       });
-
-      // Update Mobile Bottom Nav Buttons
       document.querySelectorAll('.mobile-nav-btn').forEach(btn => {
         const isTarget = btn.dataset.mobileNav === view;
         btn.classList.toggle('text-white', isTarget);
@@ -638,8 +638,57 @@
         const icon = btn.querySelector('.material-symbols-outlined');
         if (icon) icon.classList.toggle('filled', isTarget);
       });
+    }
 
+    function switchView(view) {
+      routePage = null;
+      currentView = view;
+      closeMobileSidebar();
+      updateNavButtons(view);
+      const path = view === 'home' ? '/' : '/' + view;
+      if (location.pathname !== path) history.pushState({}, '', path);
       renderContent();
+    }
+
+    // --- ROUTING ---
+    function songUrl(id) { return '/song/' + encodeURIComponent(id); }
+    function artistUrl(name) { return '/artist/' + encodeURIComponent(name); }
+    function showSong(id) { goTo(songUrl(id)); }
+    function showArtist(name) { goTo(artistUrl(name)); }
+    function showProfile() { goTo('/profile'); }
+    function goTo(path) {
+      if (location.pathname + location.search !== path) history.pushState({}, '', path);
+      parseRoute();
+    }
+    function parseRoute() {
+      const path = location.pathname;
+      const params = new URLSearchParams(location.search);
+      routePage = null;
+      if (path.startsWith('/song/')) { routePage = { type: 'song', id: decodeURIComponent(path.slice(6)) }; currentView = 'song'; routeLoading = true; }
+      else if (path.startsWith('/artist/')) { routePage = { type: 'artist', name: decodeURIComponent(path.slice(8)) }; currentView = 'artist'; routeLoading = true; }
+      else if (path === '/profile') { routePage = { type: 'profile' }; currentView = 'profile'; }
+      else if (path === '/explore') { currentView = 'explore'; }
+      else if (path === '/library') { currentView = 'library'; }
+      else if (path === '/watch' && params.get('v')) { routePage = { type: 'song', id: params.get('v') }; currentView = 'song'; }
+      else { currentView = 'home'; }
+      closeMobileSidebar();
+      updateNavButtons(currentView);
+      renderContent();
+      window.dispatchEvent(new CustomEvent('myMusicRoute', { detail: routePage }));
+    }
+    window.addEventListener('popstate', () => parseRoute());
+    function playRouteSong() {
+      const song = routeData.song || state.tracks.find(t => String(t.id) === String(routePage && routePage.id));
+      if (!song) return;
+      window.MyMusicAPI.playTrack(song);
+    }
+    function shareCurrentPage() {
+      const url = location.href;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(url).then(() => showToast('Link copied')).catch(() => showToast(url));
+      } else {
+        showToast(url);
+      }
     }
 
     // --- UI RENDERING ---
@@ -695,6 +744,10 @@
 
     function renderContent() {
       const container = document.getElementById('content-area');
+
+      if (routePage && routePage.type === 'song') { container.innerHTML = renderSongView(); return; }
+      if (routePage && routePage.type === 'artist') { container.innerHTML = renderArtistView(); return; }
+      if (routePage && routePage.type === 'profile') { container.innerHTML = renderProfileView(); return; }
 
       if (state.isLoading) {
         container.innerHTML = renderSkeletonLoader();
@@ -786,8 +839,8 @@
                         </div>
                       </div>
                       <div class="overflow-hidden">
-                        <div class="text-sm font-medium text-white truncate">${escapeHtml(track.title)}</div>
-                        <div class="text-xs text-zinc-400 truncate">${escapeHtml(track.artist || '')}${track.plays ? ` • ${escapeHtml(track.plays)}` : ''}</div>
+                        <div onclick="event.stopPropagation(); showSong('${track.id}')" class="text-sm font-medium text-white truncate hover:underline cursor-pointer">${escapeHtml(track.title)}</div>
+                        <div onclick="event.stopPropagation(); showArtist('${encodeURIComponent(track.artist || '')}')" class="text-xs text-zinc-400 truncate hover:underline cursor-pointer">${escapeHtml(track.artist || '')}${track.plays ? ` • ${escapeHtml(track.plays)}` : ''}</div>
                       </div>
                     </div>
                     <div class="flex items-center gap-1 sm:opacity-0 sm:group-hover:opacity-100 transition flex-shrink-0" onclick="event.stopPropagation()">
@@ -809,7 +862,7 @@
             </div>
             <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-5">
               ${state.artists.map(artist => `
-                <div onclick="emitEvent('onArtistSelect', '${artist.id || artist.name}')" class="flex flex-col items-center text-center group cursor-pointer">
+                <div onclick="showArtist('${encodeURIComponent(artist.name)}')" class="flex flex-col items-center text-center group cursor-pointer">
                   <div class="w-28 h-28 sm:w-36 sm:h-36 rounded-full overflow-hidden mb-3 shadow-lg border border-white/10 bg-zinc-900 flex items-center justify-center">
                     ${artist.cover ? `<img src="${artist.cover}" class="w-full h-full object-cover group-hover:scale-105 transition duration-300" />` : `<span class="material-symbols-outlined text-4xl text-zinc-600">person</span>`}
                   </div>
@@ -839,8 +892,8 @@
                     ${track.cover ? `<img src="${track.cover}" class="w-full h-full object-cover" />` : `<span class="material-symbols-outlined text-zinc-500">music_note</span>`}
                   </div>
                   <div class="overflow-hidden">
-                    <div class="text-sm font-medium text-white truncate">${escapeHtml(track.title)}</div>
-                    <div class="text-xs text-zinc-400 truncate">${escapeHtml(track.artist || '')}</div>
+                    <div onclick="event.stopPropagation(); showSong('${track.id}')" class="text-sm font-medium text-white truncate hover:underline cursor-pointer">${escapeHtml(track.title)}</div>
+                    <div onclick="event.stopPropagation(); showArtist('${encodeURIComponent(track.artist || '')}')" class="text-xs text-zinc-400 truncate hover:underline cursor-pointer">${escapeHtml(track.artist || '')}</div>
                   </div>
                 </div>
                 <span class="text-xs text-zinc-400 ml-2">${formatTime(track.duration || 0)}</span>
@@ -885,6 +938,109 @@
               </div>
             `}
           </div>
+        </div>
+      `;
+    }
+
+    function renderSongView() {
+      if (routeLoading) return `<div class="py-20 text-center text-sm text-zinc-500">Loading song…</div>`;
+      const song = routeData.song || state.tracks.find(t => String(t.id) === String(routePage.id)) || queue.find(t => String(t.id) === String(routePage.id));
+      if (!song) return renderEmptyState('music_off', 'Song not found', 'This song could not be loaded. It may have been removed, or the link is wrong.');
+      const isLiked = state.likedIds.has(song.id);
+      return `
+        <div class="max-w-3xl">
+          <button onclick="history.back()" class="text-sm text-zinc-400 hover:text-white mb-4 flex items-center gap-1"><span class="material-symbols-outlined text-base">arrow_back</span>Back</button>
+          <div class="flex flex-col sm:flex-row gap-6">
+            <div class="w-full sm:w-64 aspect-square rounded-lg overflow-hidden bg-zinc-900 flex-shrink-0 flex items-center justify-center">
+              ${song.cover ? `<img src="${song.cover}" class="w-full h-full object-cover" />` : `<span class="material-symbols-outlined text-6xl text-zinc-700">music_note</span>`}
+            </div>
+            <div class="flex-1 min-w-0">
+              <h1 class="text-2xl sm:text-3xl font-bold leading-tight">${escapeHtml(song.title)}</h1>
+              <button onclick="showArtist('${encodeURIComponent(song.artist || '')}')" class="text-sm text-zinc-400 hover:text-white hover:underline mt-2">${escapeHtml(song.artist || '')}</button>
+              <div class="flex flex-wrap items-center gap-2 mt-5">
+                <button onclick="playRouteSong()" class="px-5 py-2.5 rounded-full bg-white text-black font-medium text-sm flex items-center gap-2"><span class="material-symbols-outlined filled text-lg">play_arrow</span>Play</button>
+                <button onclick="toggleLikeById('${song.id}')" class="px-4 py-2.5 rounded-full border border-white/20 hover:bg-white/10 text-sm flex items-center gap-2"><span class="material-symbols-outlined text-lg ${isLiked ? 'filled text-white' : ''}">thumb_up</span>${isLiked ? 'Saved' : 'Save'}</button>
+                <button onclick="shareCurrentPage()" class="px-4 py-2.5 rounded-full border border-white/20 hover:bg-white/10 text-sm flex items-center gap-2"><span class="material-symbols-outlined text-lg">share</span>Share</button>
+              </div>
+              <p class="text-xs text-zinc-500 mt-4">Shareable link: <span class="text-zinc-300 break-all">${escapeHtml(location.href)}</span></p>
+              <p class="text-xs text-zinc-500 mt-2">Lyrics are not available — no lyrics source is connected, so none are shown here.</p>
+            </div>
+          </div>
+          ${routeData.related.length ? `
+            <section class="mt-10">
+              <h2 class="text-xl font-bold mb-4">Related</h2>
+              <div class="space-y-1">
+                ${routeData.related.map(rel => `
+                  <div onclick="showSong('${rel.id}')" class="flex items-center gap-3 p-2 rounded-md hover:bg-white/10 cursor-pointer">
+                    <div class="w-11 h-11 rounded overflow-hidden bg-zinc-800 flex-shrink-0">${rel.cover ? `<img src="${rel.cover}" class="w-full h-full object-cover" />` : ''}</div>
+                    <div class="overflow-hidden"><div class="text-sm font-medium text-white truncate">${escapeHtml(rel.title)}</div><div class="text-xs text-zinc-400 truncate">${escapeHtml(rel.artist || '')}</div></div>
+                  </div>
+                `).join('')}
+              </div>
+            </section>
+          ` : ''}
+        </div>
+      `;
+    }
+
+    function renderArtistView() {
+      if (routeLoading) return `<div class="py-20 text-center text-sm text-zinc-500">Loading artist…</div>`;
+      const name = (routePage && routePage.name) || routeData.artistName || '';
+      const tracks = routeData.artistTracks.length ? routeData.artistTracks : state.tracks.filter(t => t.artist === name);
+      const cover = tracks[0] ? tracks[0].cover : '';
+      return `
+        <div>
+          <button onclick="history.back()" class="text-sm text-zinc-400 hover:text-white mb-4 flex items-center gap-1"><span class="material-symbols-outlined text-base">arrow_back</span>Back</button>
+          <div class="flex items-center gap-5 mb-8">
+            <div class="w-28 h-28 sm:w-36 sm:h-36 rounded-full overflow-hidden bg-zinc-900 border border-white/10 flex-shrink-0 flex items-center justify-center">
+              ${cover ? `<img src="${cover}" class="w-full h-full object-cover" />` : `<span class="material-symbols-outlined text-5xl text-zinc-600">person</span>`}
+            </div>
+            <div class="min-w-0">
+              <h1 class="text-2xl sm:text-3xl font-bold truncate">${escapeHtml(name)}</h1>
+              <p class="text-sm text-zinc-400 mt-1">${tracks.length ? tracks.length + ' song' + (tracks.length === 1 ? '' : 's') : 'No songs found for this artist in search'}</p>
+              ${tracks.length ? `<button onclick="window.MyMusicAPI.playTrack(${JSON.stringify(tracks[0]).replace(/"/g, '&quot;')})" class="mt-4 px-5 py-2.5 rounded-full bg-white text-black font-medium text-sm">Play</button>` : ''}
+              <button onclick="shareCurrentPage()" class="mt-4 ml-2 px-4 py-2.5 rounded-full border border-white/20 hover:bg-white/10 text-sm">Share</button>
+            </div>
+          </div>
+          ${!tracks.length ? renderEmptyState('person_off', 'No songs found', 'Search returned no songs actually by this channel.') : `
+            <div class="space-y-1">
+              ${tracks.map((track, idx) => `
+                <div onclick="showSong('${track.id}')" class="flex items-center justify-between p-2.5 rounded-md hover:bg-white/10 cursor-pointer group">
+                  <div class="flex items-center gap-3 overflow-hidden"><span class="w-5 text-center text-sm text-zinc-400">${idx + 1}</span><div class="w-11 h-11 rounded overflow-hidden bg-zinc-800 flex-shrink-0">${track.cover ? `<img src="${track.cover}" class="w-full h-full object-cover" />` : ''}</div><div class="overflow-hidden"><div class="text-sm font-medium text-white truncate">${escapeHtml(track.title)}</div><div class="text-xs text-zinc-400 truncate">${escapeHtml(track.artist || '')}</div></div></div>
+                  <button onclick="event.stopPropagation(); playTrackById('${track.id}')" class="p-2 rounded-full hover:bg-white/10"><span class="material-symbols-outlined">play_arrow</span></button>
+                </div>
+              `).join('')}
+            </div>
+          `}
+        </div>
+      `;
+    }
+
+    function renderProfileView() {
+      let saved = [];
+      let files = [];
+      try { saved = JSON.parse(localStorage.getItem('my_music_saved_tracks') || '[]'); } catch {}
+      try { files = JSON.parse(localStorage.getItem('my_music_file_tracks') || '[]'); } catch {}
+      const all = [...saved, ...files];
+      return `
+        <div class="max-w-3xl">
+          <h1 class="text-2xl sm:text-3xl font-bold mb-2">Your profile</h1>
+          <p class="text-sm text-zinc-400">No sign-in needed — Google sign-in is disabled for now. Your saved tracks live in this browser only.</p>
+          <div class="flex gap-6 mt-6">
+            <div><div class="text-xl font-bold">${all.length}</div><div class="text-xs text-zinc-400">Saved tracks</div></div>
+            <div><div class="text-xl font-bold">${state.likedIds.size}</div><div class="text-xs text-zinc-400">Liked</div></div>
+          </div>
+          <button onclick="switchView('library')" class="mt-6 px-5 py-2.5 rounded-full bg-white text-black font-medium text-sm">Open Library</button>
+          ${!all.length ? `<div class="text-sm text-zinc-500 py-8">Nothing saved yet. Tap Like on a song to save it here.</div>` : `
+            <div class="space-y-1 mt-8">
+              ${all.map(track => `
+                <div onclick="showSong('${track.id}')" class="flex items-center gap-3 p-2 rounded-md hover:bg-white/10 cursor-pointer">
+                  <div class="w-11 h-11 rounded overflow-hidden bg-zinc-800 flex-shrink-0">${track.thumbnail ? `<img src="${track.thumbnail}" class="w-full h-full object-cover" />` : ''}</div>
+                  <div class="overflow-hidden"><div class="text-sm font-medium text-white truncate">${escapeHtml(track.title)}</div><div class="text-xs text-zinc-400 truncate">${escapeHtml(track.channel || '')}</div></div>
+                </div>
+              `).join('')}
+            </div>
+          `}
         </div>
       `;
     }
@@ -1268,6 +1424,9 @@
         toast.classList.add('opacity-0');
       }, 2400);
     }
+    // Deep link on first load: /song/:id, /artist/:name, /profile, etc.
+    // parseRoute() also runs on back/forward via the popstate listener.
+    try { parseRoute(); } catch (e) { /* bridge will load the home catalog */ }
   </script>
   <script src="/bridge.js"></script>
 </body>

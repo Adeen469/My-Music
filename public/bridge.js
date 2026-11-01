@@ -110,6 +110,40 @@
     });
   }
 
+  // ---- Separate pages: load song / artist / profile data on route change ----
+  async function loadRoute(route) {
+    if (!route) return;
+    try {
+      if (route.type === "song") {
+        routeLoading = true; renderContent();
+        const [videoRes, relatedRes] = await Promise.all([
+          fetch(`/api/video/${encodeURIComponent(route.id)}`),
+          fetch(`/api/related/${encodeURIComponent(route.id)}`),
+        ]);
+        const video = await videoRes.json();
+        const related = relatedRes.ok ? await relatedRes.json() : { items: [] };
+        if (!videoRes.ok) throw new Error(video.error || "Song not found");
+        routeData = { song: mapItem(video), related: (related.items || []).map(mapItem), artistTracks: [], artistName: video.channel || "" };
+        routeLoading = false; renderContent();
+      } else if (route.type === "artist") {
+        routeLoading = true; renderContent();
+        const res = await fetch(`/api/artist/${encodeURIComponent(route.name)}`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Artist not found");
+        routeData = { song: null, related: [], artistTracks: (data.items || []).map(mapItem), artistName: route.name };
+        routeLoading = false; renderContent();
+      } else if (route.type === "profile") {
+        await loadLibrary();
+        renderContent();
+      }
+    } catch (e) {
+      routeLoading = false;
+      API.notify(e.message);
+      try { renderContent(); } catch {}
+    }
+  }
+  window.addEventListener("myMusicRoute", (e) => loadRoute(e.detail));
+
   // ---- MyMusicAPI event wiring ----
   let searchTimer = null;
   API.on("onSearch", (q) => {
@@ -139,7 +173,8 @@
   });
   API.on("onPlaylistSelect", () => { loadLibrary(); window.switchView("library"); });
   API.on("onCastClick", () => API.notify("Cast is not available in this web app."));
-  API.on("onProfileClick", () => API.notify("No sign-in needed — Google sign-in is disabled for now."));
+  API.on("onProfileClick", () => { try { window.showProfile(); } catch { API.notify("No sign-in needed — Google sign-in is disabled for now."); } });
+  API.on("onArtistSelect", (name) => { try { window.showArtist(name); } catch {} });
   API.on("onCreatePlaylist", (name) => API.notify(`Playlist "${name}" is not saved yet — use Like (Save) to keep tracks in your Library for now.`));
 
   // Nav clicks: load the right data after the UI switches view.
@@ -156,6 +191,10 @@
       const health = await (await fetch("/api/health")).json();
       if (!health.youtubeConfigured) API.notify("YouTube API is not connected yet: set YOUTUBE_API_KEY in Vercel env vars, then redeploy. No sample songs are shown.");
     } catch { /* health is best-effort */ }
-    loadTrending();
+    // Deep link (parsed by index.html before this script ran) wins over home.
+    try {
+      if (typeof routePage !== "undefined" && routePage) loadRoute(routePage);
+      else loadTrending();
+    } catch { loadTrending(); }
   })();
 })();
