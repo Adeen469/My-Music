@@ -249,6 +249,33 @@
   }
   window.__playRecommendedNext = playRecommendedNext;
 
+  // ---- Playlists (real, 2026-11-01) ----
+  // Why "New playlist" never created one before: handleCreatePlaylist
+  // only prompted for a name and the old onCreatePlaylist handler just
+  // showed a "not saved yet" toast — there was no storage, no server
+  // endpoint and no playlist table anywhere. Playlists now live in
+  // this browser's localStorage, exactly like Saved tracks / Library:
+  // that is why they work immediately with no sign-in and no Supabase
+  // setup, and why a "public" playlist is a saved visibility flag
+  // shown beside its title — it does NOT yet publish the playlist to
+  // other users or devices, because there is no server account behind
+  // it yet. Server sharing would need a playlists table + sign-in.
+  const PL_KEY = "my_music_playlists";
+  function loadPlaylists() { try { return JSON.parse(localStorage.getItem(PL_KEY) || "[]"); } catch { return []; } }
+  function savePlaylists(list) { try { localStorage.setItem(PL_KEY, JSON.stringify(list)); } catch {} }
+  function userPlaylistsForUI() {
+    return loadPlaylists().map((pl) => ({
+      id: pl.id, name: pl.name, visibility: pl.visibility || "private",
+      sub: `${pl.visibility === "public" ? "Public" : "Private"} • ${(pl.tracks || []).length} song${(pl.tracks || []).length === 1 ? "" : "s"}`,
+      tracks: pl.tracks || [],
+    }));
+  }
+  function refreshPlaylistsUI() {
+    const all = [...userPlaylistsForUI(), { id: "saved-tracks", name: "Saved tracks", sub: "Local library (no sign-in)" }];
+    if (typeof API.setPlaylists === "function") API.setPlaylists(all);
+    else if (typeof setCatalogFor === "function") setCatalogFor(currentTracks);
+  }
+
   let currentTracks = [];
   function setCatalogFor(tracks, opts = {}) {
     currentTracks = tracks;
@@ -257,7 +284,7 @@
       tracks,
       albums: opts.albums || [],
       artists: artistsFrom(tracks),
-      playlists: opts.playlists || [{ name: "Saved tracks", sub: "Local library (no sign-in)" }],
+      playlists: opts.playlists || [...userPlaylistsForUI(), { id: "saved-tracks", name: "Saved tracks", sub: "Local library (no sign-in)" }],
       moods: [],
       likedIds: opts.likedIds || localSaved().map((t) => t.id),
     });
@@ -381,7 +408,76 @@
       API.notify("Removed from Library.");
     }
   });
-  API.on("onPlaylistSelect", () => { loadLibrary(); window.switchView("library"); });
+  API.on("onPlaylistSelect", (id) => {
+    const pl = loadPlaylists().find((p) => String(p.id) === String(id));
+    if (pl) {
+      // Refresh the sidebar copy so the view has the latest tracks,
+      // then open the playlist view (index.html renderPlaylistView).
+      refreshPlaylistsUI();
+      try { if (typeof window.showPlaylist === "function") window.showPlaylist(pl.id); } catch {}
+      return;
+    }
+    loadLibrary(); window.switchView("library");
+  });
+  API.on("onCreatePlaylist", (input) => {
+    const name = typeof input === "string" ? input.trim() : (input && input.name ? String(input.name).trim() : "");
+    const visibility = input && input.visibility === "public" ? "public" : "private";
+    if (!name) { API.notify("Enter a playlist name"); return; }
+    const list = loadPlaylists();
+    if (list.some((p) => p.name.toLowerCase() === name.toLowerCase())) { API.notify(`A playlist called "${name}" already exists`); return; }
+    list.push({ id: `pl-${Date.now()}`, name, visibility, tracks: [], createdAt: Date.now() });
+    savePlaylists(list);
+    refreshPlaylistsUI();
+    API.notify(`Playlist "${name}" created (${visibility === "public" ? "Public" : "Private"})`);
+  });
+  API.on("onAddToPlaylist", async (input) => {
+    const trackId = input && (input.trackId || input.id);
+    const playlistId = input && input.playlistId;
+    if (!trackId || !playlistId) return;
+    const list = loadPlaylists();
+    const pl = list.find((p) => String(p.id) === String(playlistId));
+    if (!pl) { API.notify("Playlist not found"); return; }
+    let track = poolById.get(trackId) || currentTracks.find((t) => String(t.id) === String(trackId));
+    if (!track) {
+      try {
+        const res = await fetch(`/api/video/${encodeURIComponent(trackId)}`);
+        const video = await res.json();
+        if (!res.ok) throw new Error(video.error || "Song not found");
+        track = mapItem(video);
+      } catch (e) { API.notify(e.message); return; }
+    }
+    if ((pl.tracks || []).some((t) => String(t.id) === String(trackId))) { API.notify("Already in this playlist"); return; }
+    pl.tracks = [...(pl.tracks || []), track];
+    savePlaylists(list);
+    refreshPlaylistsUI();
+    API.notify(`Added to "${pl.name}"`);
+  });
+  API.on("onRemoveFromPlaylist", (input) => {
+    const list = loadPlaylists();
+    const pl = list.find((p) => String(p.id) === String(input && input.playlistId));
+    if (!pl) return;
+    pl.tracks = (pl.tracks || []).filter((t) => String(t.id) !== String(input.trackId));
+    savePlaylists(list);
+    refreshPlaylistsUI();
+  });
+  API.on("onPlaylistVisibility", (input) => {
+    const list = loadPlaylists();
+    const pl = list.find((p) => String(p.id) === String(input && input.id));
+    if (!pl) return;
+    pl.visibility = input.visibility === "public" ? "public" : "private";
+    savePlaylists(list);
+    refreshPlaylistsUI();
+    API.notify(`"${pl.name}" is now ${pl.visibility}`);
+  });
+  API.on("onPlaylistDelete", (id) => {
+    const playlistId = typeof id === "string" ? id : (id && id.id);
+    savePlaylists(loadPlaylists().filter((p) => String(p.id) !== String(playlistId)));
+    refreshPlaylistsUI();
+    try {
+      if (typeof routePage !== "undefined" && routePage && routePage.type === "playlist" && String(routePage.id) === String(playlistId)) window.switchView("home");
+    } catch {}
+    API.notify("Playlist deleted");
+  });
   API.on("onCastClick", () => API.notify("Cast is not available in this web app."));
   // Sign-in state: avatar shows your initial when signed in, and tapping
   // it goes to your profile; when signed out it starts Google sign-in.
@@ -404,7 +500,9 @@
     else { window.location.href = "/auth/google"; }
   });
   API.on("onArtistSelect", (name) => { try { window.showArtist(name); } catch {} });
-  API.on("onCreatePlaylist", (name) => API.notify(`Playlist "${name}" is not saved yet — use Like (Save) to keep tracks in your Library for now.`));
+  // NOTE: the old "not saved yet" onCreatePlaylist stub was here and
+  // has been deleted — the real handler is above, otherwise it would
+  // overwrite it (API.on replaces the previous handler).
 
   // Nav clicks: load the right data after the UI switches view.
   document.querySelectorAll('[data-nav="home"], [data-mobile-nav="home"]').forEach((b) => b.addEventListener("click", () => loadTrending()));
