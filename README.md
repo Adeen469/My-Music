@@ -102,10 +102,16 @@ empty state and a clear message instead of fake songs.
 
 ## Deploying to Vercel
 
-This repo is Vercel-ready: `vercel.json` serves the frontend from `public/`
-and routes `/api/*` and `/auth/*` to the serverless function in `api/index.js`
-(which reuses `server.js`). Locally, `npm start` still runs the same Express
-app directly.
+This repo uses Vercel's zero-config Express deployment: the root
+`server.js` exports the Express app (and serves the frontend from
+`public/` itself), so Vercel auto-detects it as the entrypoint. There is
+deliberately **no `vercel.json` and no `api/` folder** — an earlier version
+had both, and Vercel's build failed with
+`No entrypoint found which imports express. Found possible entrypoint: app.js`,
+because the frontend file `public/app.js` looked like a server entrypoint
+to Vercel's detector and the rewrites conflicted with it. The frontend
+script is therefore named `public/main.js`, not `app.js`. Locally,
+`npm start` still runs the same Express app directly.
 
 After importing the repo into Vercel, set these environment variables in the
 Vercel project settings (Production) — do not paste real values in chat:
@@ -121,7 +127,7 @@ but show the same "API not connected" message as locally.
 ```
 .env                  # root env file (gitignored, fill in locally)
 .env.example          # blank template for .env
-server.js             # Express backend + YouTube / Google / Supabase APIs
-public/               # frontend (index.html, styles.css, app.js)
+server.js             # Express backend + YouTube / Google / Supabase APIs (also the Vercel entrypoint)
+public/               # frontend (index.html, styles.css, main.js)
 supabase/schema.sql   # saved_tracks table
 ```
