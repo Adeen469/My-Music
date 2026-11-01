@@ -685,7 +685,70 @@
       });
     }
 
+    // GATED APP (2026-11-01, user request): without admin approval
+    // the app shows ONLY the landing page — no Home, Explore,
+    // Library, artist or profile view, and no music. An approved
+    // user sees the real app; a pending user sees the pending page;
+    // a rejected user is sent back to the landing page.
+    function showLanding() {
+      routePage = null;
+      currentView = 'landing';
+      closeMobileSidebar();
+      updateNavButtons('landing');
+      if (location.pathname !== '/' || location.search) history.replaceState({}, '', '/');
+      renderContent();
+    }
+    function showPending() {
+      routePage = null;
+      currentView = 'pending';
+      closeMobileSidebar();
+      updateNavButtons('pending');
+      if (location.pathname !== '/' || location.search) history.replaceState({}, '', '/');
+      renderContent();
+    }
+    function renderLandingView() {
+      const rejected = window.__registrationRejected === true;
+      return `<div class="flex flex-col items-center justify-center text-center px-6 py-20">
+        <div class="w-20 h-20 rounded-full bg-red-600 flex items-center justify-center shadow-lg shadow-red-600/30 mb-6">
+          <span class="material-symbols-outlined text-white text-4xl filled">play_arrow</span>
+        </div>
+        <h1 class="text-4xl md:text-5xl font-bold text-white mb-3">My Music</h1>
+        <p class="text-zinc-400 text-lg max-w-md mb-2">Your music, your way — trending songs, artists, playlists and your library.</p>
+        <p class="text-zinc-500 text-sm max-w-md mb-8">Access is by admin approval only. Sign in with Google to register, and the admin will approve your account.</p>
+        ${rejected ? `<p class="bg-red-500/10 border border-red-500/30 text-red-300 text-sm rounded-xl px-4 py-3 mb-6 max-w-md">Your registration was not approved by the admin. You are back on the landing page.</p>` : ''}
+        <a href="/auth/google" class="inline-flex items-center gap-3 bg-white text-zinc-900 font-semibold rounded-full px-6 py-3 hover:bg-zinc-200 transition">
+          <span class="material-symbols-outlined">login</span> Sign in with Google
+        </a>
+        <p class="text-zinc-600 text-xs mt-6">New here? Signing in for the first time creates your registration request.</p>
+      </div>`;
+    }
+    function renderPendingView() {
+      return `<div class="flex flex-col items-center justify-center text-center px-6 py-20">
+        <div class="w-20 h-20 rounded-full bg-amber-500/20 border border-amber-500/40 flex items-center justify-center mb-6">
+          <span class="material-symbols-outlined text-amber-400 text-4xl">hourglass_top</span>
+        </div>
+        <h1 class="text-3xl md:text-4xl font-bold text-white mb-3">Waiting for admin approval</h1>
+        <p class="text-zinc-400 max-w-md mb-8">Your registration was received. You will be able to open My Music once the admin approves you. Until then, this is all you can see.</p>
+        <div class="flex flex-wrap justify-center gap-3">
+          <a href="/auth/google" class="inline-flex items-center gap-2 bg-white text-zinc-900 font-semibold rounded-full px-6 py-3 hover:bg-zinc-200 transition">
+            <span class="material-symbols-outlined">refresh</span> Check approval status
+          </a>
+          <button onclick="showLanding()" class="inline-flex items-center gap-2 bg-zinc-800 text-white font-semibold rounded-full px-6 py-3 hover:bg-zinc-700 transition">Back to landing page</button>
+        </div>
+        <p class="text-zinc-600 text-xs mt-6">Checking status signs you in again — if you are approved, the app opens; if not, you will see this page again.</p>
+      </div>`;
+    }
+    window.showLanding = showLanding;
+    window.showPending = showPending;
+
     function switchView(view) {
+      // Gate: once the bridge has checked /api/me, an unapproved
+      // visitor cannot switch away from the landing/pending page
+      // by tapping Home, Explore or Library in the sidebar.
+      if (typeof window.__currentUser !== 'undefined' && !window.__currentUser && view !== 'landing' && view !== 'pending') {
+        showLanding();
+        return;
+      }
       routePage = null;
       currentView = view;
       closeMobileSidebar();
@@ -878,6 +941,8 @@
       // No song view: routePage.type === 'song' is never set any more
       // (see parseRoute). If an old value somehow survived, fall
       // through to Home instead of ever rendering a song page.
+      if (currentView === 'landing') { container.innerHTML = renderLandingView(); return; }
+      if (currentView === 'pending') { container.innerHTML = renderPendingView(); return; }
       if (routePage && routePage.type === 'playlist') { container.innerHTML = renderPlaylistView(); return; }
       if (routePage && routePage.type === 'artist') { container.innerHTML = renderArtistView(); return; }
       if (routePage && routePage.type === 'profile') { container.innerHTML = renderProfileView(); return; }

@@ -349,6 +349,11 @@
   // can no longer reach here via parseRoute, but if one somehow does,
   // play it on Home instead of ever rendering a song page.
   async function loadRoute(route) {
+    // Gated app: once auth has been checked, an unapproved visitor
+    // is sent back to the landing page on any route change, including
+    // Back to '/' (route = null). Before the check runs,
+    // __currentUser is undefined, so do not gate yet.
+    if (typeof window.__currentUser !== "undefined" && !window.__currentUser && typeof window.showLanding === "function") { window.showLanding(); return; }
     if (!route) return;
     try {
       if (route.type === "song") {
@@ -381,6 +386,7 @@
   // ---- MyMusicAPI event wiring ----
   let searchTimer = null;
   API.on("onSearch", (q) => {
+    if (!window.__currentUser && typeof window.showLanding === "function") { window.showLanding(); return; }
     if (q) recordRec({ type: "search", query: q });
     clearTimeout(searchTimer);
     if (!q) { loadTrending(); return; }
@@ -409,6 +415,7 @@
     }
   });
   API.on("onPlaylistSelect", (id) => {
+    if (!window.__currentUser && typeof window.showLanding === "function") { window.showLanding(); return; }
     const pl = loadPlaylists().find((p) => String(p.id) === String(id));
     if (pl) {
       // Refresh the sidebar copy so the view has the latest tracks,
@@ -489,6 +496,7 @@
         if (data.registrationStatus === "removed") API.notify("Your account was removed by the admin.");
         else if (data.registrationStatus === "rejected") API.notify("Your registration was not approved by the admin.");
         else if (data.registrationStatus === "pending") API.notify("Your registration is waiting for admin approval.");
+        else if (data.registrationStatus === "setup") API.notify("Admin approval is not set up yet — the admin needs to finish the Supabase setup.");
       }
       const avatar = document.getElementById("user-avatar");
       if (avatar && data.user) {
@@ -498,7 +506,8 @@
       if (typeof renderContent === "function") {
         try { if (typeof routePage !== "undefined" && routePage && routePage.type === "profile") renderContent(); } catch {}
       }
-    } catch {}
+      return data.user || null;
+    } catch { return null; }
   }
   API.on("onProfileClick", () => {
     if (window.__currentUser) { try { window.showProfile(); } catch {} }
@@ -510,27 +519,47 @@
   // overwrite it (API.on replaces the previous handler).
 
   // Nav clicks: load the right data after the UI switches view.
-  document.querySelectorAll('[data-nav="home"], [data-mobile-nav="home"]').forEach((b) => b.addEventListener("click", () => loadTrending()));
-  document.querySelectorAll('[data-nav="explore"], [data-mobile-nav="explore"]').forEach((b) => b.addEventListener("click", () => loadTrending()));
-  document.querySelectorAll('[data-nav="library"], [data-mobile-nav="library"]').forEach((b) => b.addEventListener("click", () => loadLibrary()));
+  // Gated app: unapproved visitors stay on the landing page.
+  const gated = (fn) => () => { if (!window.__currentUser && typeof window.showLanding === "function") window.showLanding(); else fn(); };
+  document.querySelectorAll('[data-nav="home"], [data-mobile-nav="home"]').forEach((b) => b.addEventListener("click", gated(loadTrending)));
+  document.querySelectorAll('[data-nav="explore"], [data-mobile-nav="explore"]').forEach((b) => b.addEventListener("click", gated(loadTrending)));
+  document.querySelectorAll('[data-nav="library"], [data-mobile-nav="library"]').forEach((b) => b.addEventListener("click", gated(loadLibrary)));
 
   // Startup
   if (document.readyState !== "loading") bindPlayPauseSync();
   else document.addEventListener("DOMContentLoaded", bindPlayPauseSync);
 
   (async () => {
-    // Admin approval notices: the Google callback redirects here with
-    // ?registration=pending|rejected after a first/rejected sign-in.
-    // Show it once, then clean the URL so it does not repeat on reload.
-    try {
-      const params = new URLSearchParams(location.search);
-      const reg = params.get("registration");
-      if (reg === "pending") API.notify("Your registration is waiting for admin approval. You can still listen without signing in.");
-      else if (reg === "rejected") API.notify("Your registration was not approved by the admin.");
-      else if (reg === "removed") API.notify("Your account was removed by the admin.");
-      if (reg) history.replaceState({}, "", location.pathname);
-    } catch {}
-    refreshMe();
+    // GATED APP (2026-11-01, user request): auth is checked FIRST,
+    // and no catalog, search or artist data is loaded at all until
+    // /api/me confirms an APPROVED user. Everyone else sees only:
+    //   ?registration=pending  -> the pending page
+    //   ?registration=rejected -> the landing page (with a notice)
+    //   otherwise               -> the landing page
+    // A pending user has no session, so on a later visit they see
+    // the landing page, sign in again, and get the pending page
+    // again until the admin approves them.
+    let reg = null;
+    try { reg = new URLSearchParams(location.search).get("registration"); } catch {}
+    const user = await refreshMe();
+    if (reg === "pending") {
+      window.__registrationRejected = false;
+      if (typeof window.showPending === "function") window.showPending();
+      API.notify("Your registration is waiting for admin approval.");
+      return;
+    }
+    if (reg === "rejected" || reg === "removed") {
+      window.__registrationRejected = (reg === "rejected");
+      if (typeof window.showLanding === "function") window.showLanding();
+      API.notify(reg === "rejected" ? "Your registration was not approved by the admin." : "Your account was removed by the admin.");
+      return;
+    }
+    if (!user) {
+      window.__registrationRejected = false;
+      if (typeof window.showLanding === "function") window.showLanding();
+      return;
+    }
+    // Approved user only from here: the real app.
     try {
       const health = await (await fetch("/api/health")).json();
       if (!health.youtubeConfigured) API.notify("YouTube API is not connected yet: set YOUTUBE_API_KEY in Vercel env vars, then redeploy. No sample songs are shown.");

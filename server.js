@@ -85,10 +85,26 @@ function parseCookies(req) {
   }
   return out;
 }
+function signUserSession(user) {
+  // Signed like the admin session: payload.sig with HMAC keyed by
+  // GOOGLE_CLIENT_SECRET (server-side only, never sent to the browser).
+  // Without this, anyone who knew an approved email could forge a
+  // plain base64 cookie and walk past the approval gate, so old
+  // unsigned cookies are treated as no session at all — those users
+  // simply sign in again through Google.
+  const payload = Buffer.from(JSON.stringify(user), "utf8").toString("base64url");
+  const sig = crypto.createHmac("sha256", GOOGLE_CLIENT_SECRET).update(payload).digest("base64url");
+  return `${payload}.${sig}`;
+}
 function getUser(req) {
   try {
-    const raw = parseCookies(req).my_music_user;
-    return raw ? JSON.parse(Buffer.from(raw, "base64url").toString("utf8")) : null;
+    if (!GOOGLE_CLIENT_SECRET) return null;
+    const raw = parseCookies(req).my_music_user || "";
+    const [payload, sig] = raw.split(".");
+    if (!payload || !sig) return null;
+    const expected = crypto.createHmac("sha256", GOOGLE_CLIENT_SECRET).update(payload).digest("base64url");
+    if (!safeEqualString(sig, expected)) return null;
+    return JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
   } catch {
     return null;
   }
@@ -199,12 +215,16 @@ app.get("/api/health", (req, res) => {
 app.get("/api/me", async (req, res) => {
   const user = AUTH_ENABLED ? getUser(req) : null;
   if (!user || !user.email) return res.json({ user: null, authEnabled: AUTH_ENABLED });
-  // Admin approval enforcement (2026-11-01): a signed-in Google user
-  // who is not approved in Supabase is signed out here, so removing
-  // a user in /admin revokes them without waiting for their cookie
-  // to expire. If Supabase is not configured, existing sessions keep
-  // working, but new Google sign-ins are blocked in the callback —
-  // they are never silently approved.
+  // Admin approval enforcement (2026-11-01, gated app 2026-11-01):
+  // a signed-in Google user who is not approved in Supabase is signed
+  // out here, so removing a user in /admin revokes them without
+  // waiting for their cookie to expire. If Supabase is not
+  // configured, approval cannot be verified, so NO session counts
+  // as approved — the app shows only the landing page (fail closed).
+  // New Google sign-ins are blocked in the callback too.
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+    return res.json({ user: null, authEnabled: AUTH_ENABLED, registrationStatus: "setup" });
+  }
   if (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
     try {
       const row = await getRegisteredUser(user.email);
@@ -220,7 +240,7 @@ app.get("/api/me", async (req, res) => {
 });
 
 // ---- YouTube Data API (proxied so the API key never reaches the browser) ----
-app.get("/api/search", async (req, res) => {
+app.get("/api/search", requireApprovedUser, async (req, res) => {
   const q = (req.query.q || "").trim();
   if (!q) return res.status(400).json({ error: "Missing ?q=" });
   try {
@@ -234,7 +254,7 @@ app.get("/api/search", async (req, res) => {
   }
 });
 
-app.get("/api/trending", async (req, res) => {
+app.get("/api/trending", requireApprovedUser, async (req, res) => {
   try {
     const data = await youtube("videos", {
       part: "snippet,statistics,contentDetails,status", chart: "mostPopular",
@@ -246,7 +266,7 @@ app.get("/api/trending", async (req, res) => {
   }
 });
 
-app.get("/api/video/:id", async (req, res) => {
+app.get("/api/video/:id", requireApprovedUser, async (req, res) => {
   try {
     const data = await youtube("videos", {
       part: "snippet,statistics,contentDetails,status", id: req.params.id,
@@ -260,7 +280,7 @@ app.get("/api/video/:id", async (req, res) => {
   }
 });
 
-app.get("/api/artist/:name", async (req, res) => {
+app.get("/api/artist/:name", requireApprovedUser, async (req, res) => {
   const name = (req.params.name || "").trim();
   if (!name) return res.status(400).json({ error: "Missing artist name" });
   try {
@@ -276,7 +296,7 @@ app.get("/api/artist/:name", async (req, res) => {
   }
 });
 
-app.get("/api/related/:id", async (req, res) => {
+app.get("/api/related/:id", requireApprovedUser, async (req, res) => {
   try {
     const data = await youtube("search", {
       part: "snippet", type: "video", relatedToVideoId: req.params.id, maxResults: "12", regionCode: "IN",
@@ -354,7 +374,7 @@ app.get("/auth/google/callback", async (req, res) => {
     if (row && row.status !== "approved") {
       return res.redirect(`/?registration=${row.status === "rejected" ? "rejected" : "pending"}`);
     }
-    const cookie = Buffer.from(JSON.stringify(user), "utf8").toString("base64url");
+    const cookie = signUserSession(user);
     const isHttps = (req.get && req.get("x-forwarded-proto") === "https") || req.secure;
     res.setHeader("Set-Cookie", `my_music_user=${encodeURIComponent(cookie)}; Path=/; Max-Age=2592000; HttpOnly; SameSite=Lax${isHttps ? "; Secure" : ""}`);
     res.redirect("/");
@@ -405,8 +425,13 @@ async function supabaseFetch(query, method = "GET", body) {
   return data;
 }
 
-app.get("/api/library", async (req, res) => {
-  const email = (req.query.email || "").trim();
+app.get("/api/library", requireApprovedUser, async (req, res) => {
+  // Gated app: a user can only read their own saved tracks.
+  const requested = (req.query.email || "").trim();
+  if (requested && requested.toLowerCase() !== req.approvedUser.email.toLowerCase()) {
+    return res.status(403).json({ error: "You can only access your own library" });
+  }
+  const email = requested || req.approvedUser.email;
   if (!email) return res.json({ tracks: [], supabaseConfigured: Boolean(SUPABASE_URL) });
   try {
     const rows = await supabaseFetch(
@@ -430,9 +455,12 @@ function validDownloadUrl(url) {
   return url;
 }
 
-app.post("/api/library", async (req, res) => {
+app.post("/api/library", requireApprovedUser, async (req, res) => {
   const { email, video_id, title, channel, thumbnail, download_url } = req.body || {};
   if (!email || !video_id) return res.status(400).json({ error: "email and video_id are required" });
+  if (email.toLowerCase() !== req.approvedUser.email.toLowerCase()) {
+    return res.status(403).json({ error: "You can only save to your own library" });
+  }
   const dl = validDownloadUrl(download_url);
   if (dl === null) return res.status(400).json({ error: "download_url must be an http(s) link" });
   try {
@@ -448,9 +476,12 @@ app.post("/api/library", async (req, res) => {
 
 // Attach (or replace) a direct audio file link for a saved track.
 // This is the user's own / licensed file — it never extracts a YouTube stream.
-app.patch("/api/library/download-url", async (req, res) => {
+app.patch("/api/library/download-url", requireApprovedUser, async (req, res) => {
   const { email, video_id, download_url } = req.body || {};
   if (!email || !video_id) return res.status(400).json({ error: "email and video_id are required" });
+  if (email.toLowerCase() !== req.approvedUser.email.toLowerCase()) {
+    return res.status(403).json({ error: "You can only change your own library" });
+  }
   const dl = validDownloadUrl(download_url);
   if (dl === null) return res.status(400).json({ error: "download_url must be an http(s) link" });
   try {
@@ -465,10 +496,13 @@ app.patch("/api/library/download-url", async (req, res) => {
   }
 });
 
-app.delete("/api/library", async (req, res) => {
+app.delete("/api/library", requireApprovedUser, async (req, res) => {
   const email = (req.query.email || "").trim();
   const videoId = (req.query.video_id || "").trim();
   if (!email || !videoId) return res.status(400).json({ error: "email and video_id are required" });
+  if (email.toLowerCase() !== req.approvedUser.email.toLowerCase()) {
+    return res.status(403).json({ error: "You can only delete from your own library" });
+  }
   try {
     await supabaseFetch(
       `saved_tracks?user_email=eq.${encodeURIComponent(email)}&video_id=eq.${encodeURIComponent(videoId)}`,
@@ -479,6 +513,30 @@ app.delete("/api/library", async (req, res) => {
     res.status(e.status || 500).json({ error: e.message });
   }
 });
+
+// ---- Gated app (2026-11-01, user request) ----
+// Without admin approval, a visitor sees ONLY the landing page.
+// The frontend enforces that, but the content APIs enforce it too,
+// so a direct /api/trending or /api/search call without an approved
+// signed session gets 401/403, not music. Admin sessions do NOT
+// grant app access — an admin who wants the app signs in with
+// Google and approves themselves in /admin like anyone else.
+async function requireApprovedUser(req, res, next) {
+  if (!AUTH_ENABLED) return res.status(401).json({ error: "Sign-in and admin approval required" });
+  const user = getUser(req);
+  if (!user || !user.email) return res.status(401).json({ error: "Sign-in and admin approval required" });
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+    return res.status(503).json({ error: "User approval is not configured yet (Supabase)" });
+  }
+  try {
+    const row = await getRegisteredUser(user.email);
+    if (!row || row.status !== "approved") return res.status(403).json({ error: "Admin approval required" });
+  } catch (e) {
+    return res.status(500).json({ error: `Approval check failed: ${e.message}` });
+  }
+  req.approvedUser = user;
+  next();
+}
 
 // ---- Admin panel (/admin) ----
 // Stateless signed session: the cookie holds {email, exp} plus an
