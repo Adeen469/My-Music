@@ -66,6 +66,15 @@ set `AUTH_ENABLED=true` in Vercel, keep `GOOGLE_CLIENT_ID`,
   make it a strong unique password (do not use a short default), and
   never commit it or paste it in chat.
 
+## Pages (separate URLs, like YouTube Music)
+
+- `/` — Home, `/explore` — Explore, `/library` — Library
+- `/song/<videoId>` — song page: cover, artist link, Play, Save, Share (copies its link), Related
+- `/artist/<channel name>` — artist page: avatar, song list, Play, Share (only songs actually by that channel, via `/api/artist/:name`)
+- `/profile` — profile page: no sign-in needed, saved-track count + saved list in this browser
+- `/watch?v=<videoId>` works as an alias for a song page.
+The server serves the same app for all of these, so a shared link or a refresh on a song/artist page does not 404. Back/forward buttons work via browser history.
+
 ## Frontend — Tailwind UI + bridge
 
 The frontend is the uploaded Tailwind UI (`public/index.html`, zero
