@@ -54,10 +54,17 @@ const AUTH_ENABLED = process.env.AUTH_ENABLED === "false"
 // registered in the Google Cloud OAuth client, or Google returns
 // redirect_uri_mismatch.
 function getRedirectUri(req) {
-  if (process.env.GOOGLE_REDIRECT_URI) return process.env.GOOGLE_REDIRECT_URI;
   const proto = (req.get && req.get("x-forwarded-proto")) || req.protocol || "https";
   const host = (req.get && req.get("host")) || `localhost:${PORT}`;
-  return `${proto}://${host}/auth/google/callback`;
+  const fromHost = `${proto}://${host}/auth/google/callback`;
+  const envUri = process.env.GOOGLE_REDIRECT_URI || "";
+  // Guard against the exact bug seen live 2026-11-01: Vercel had
+  // GOOGLE_REDIRECT_URI=http://localhost:3000/... set, so production
+  // sent Google a localhost redirect and got redirect_uri_mismatch.
+  // A localhost env value must never win on a non-localhost host.
+  if (envUri && !(host.startsWith("localhost") || host.startsWith("127.0.0.1")) && envUri.includes("localhost")) return fromHost;
+  if (envUri) return envUri;
+  return fromHost;
 }
 const SUPABASE_URL = (process.env.SUPABASE_URL || "").replace(/\/$/, "");
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
