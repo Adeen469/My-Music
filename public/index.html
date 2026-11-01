@@ -790,9 +790,6 @@
                       <button onclick="toggleLikeById('${track.id}')" class="p-1.5 rounded-full hover:bg-white/10 text-zinc-300">
                         <span class="material-symbols-outlined text-lg ${isLiked ? 'filled text-white' : ''}">thumb_up</span>
                       </button>
-                      <button onclick="downloadTrackById('${track.id}')" class="p-1.5 rounded-full hover:bg-white/10 text-zinc-300" title="Download">
-                        <span class="material-symbols-outlined text-lg">download</span>
-                      </button>
                     </div>
                   </div>
                 `;
@@ -922,9 +919,7 @@
       if (!track) return;
       document.getElementById('progress-scrubber').disabled = false;
 
-      const yt = document.getElementById('yt-engine');
       if (track.audioUrl) {
-        if (yt) yt.src = '';
         audio.src = track.audioUrl;
         audio.play().then(() => {
           isPlaying = true;
@@ -933,14 +928,6 @@
           isPlaying = false;
           updatePlayPauseIcon();
         });
-      } else if (track.videoId) {
-        // Real YouTube playback: the nocookie embed. The audio element has
-        // no file for these tracks, so playing it silently would be fake.
-        audio.pause();
-        audio.removeAttribute('src');
-        if (yt) yt.src = `https://www.youtube-nocookie.com/embed/${track.videoId}?autoplay=1&rel=0`;
-        isPlaying = true;
-        updatePlayPauseIcon();
       } else {
         audio.removeAttribute('src');
         isPlaying = true;
@@ -1000,12 +987,7 @@
         return;
       }
 
-      const cur = queue[currentIndex];
-      const yt = document.getElementById('yt-engine');
-      if (cur && cur.videoId && !cur.audioUrl && yt) {
-        if (isPlaying) { yt.src = ''; isPlaying = false; }
-        else { yt.src = `https://www.youtube-nocookie.com/embed/${cur.videoId}?autoplay=1&rel=0`; isPlaying = true; }
-      } else if (audio.src) {
+      if (audio.src) {
         if (audio.paused) {
           audio.play().catch(() => {});
           isPlaying = true;
