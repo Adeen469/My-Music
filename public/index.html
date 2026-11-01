@@ -1184,8 +1184,9 @@
     }
 
     // --- PLAYBACK LOGIC ---
-    function startPlayback(track) {
+    function startPlayback(track, options) {
       if (!track) return;
+      const shouldNavigate = !options || options.navigate !== false;
       document.getElementById('progress-scrubber').disabled = false;
 
       if (track.audioUrl) {
@@ -1210,7 +1211,12 @@
       // the URL to /song/<id> with pushState (no reload, so the bottom
       // player keeps playing) and show the song page. Back returns to
       // the previous page. Already on that song's page: stay put.
-      if (!(routePage && routePage.type === 'song' && String(routePage.id) === String(track.id))) {
+      // Next/Prev pass navigate:false (unless already on a song page),
+      // so they only change the player and the open drawer, and never
+      // force a page switch or close the drawer.
+      if (!shouldNavigate) {
+        if (typeof renderDrawerContent === 'function') renderDrawerContent();
+      } else if (!(routePage && routePage.type === 'song' && String(routePage.id) === String(track.id))) {
         if (drawerOpen) toggleDrawer();
         routePage = { type: 'song', id: track.id };
         currentView = 'song';
@@ -1313,10 +1319,17 @@
       if (trackId) playTrackById(trackId);
     }
 
+    // Next/Prev are player controls, not "open this song" actions:
+    // they must play the next track in the bottom player without
+    // forcing the main view to a song page (and without closing the
+    // Now Playing drawer). The one exception is when you are already
+    // on a song page — then the page follows the new song, so the
+    // page, URL and player stay in sync. Tapping a song, Play, and
+    // autoplay still open that song's page as before.
     function nextTrack() {
       if (!queue.length) return;
       currentIndex = (currentIndex + 1) % queue.length;
-      startPlayback(queue[currentIndex]);
+      startPlayback(queue[currentIndex], { navigate: routePage && routePage.type === 'song' });
     }
 
     function prevTrack() {
@@ -1325,7 +1338,7 @@
         audio.currentTime = 0;
       } else {
         currentIndex = (currentIndex - 1 + queue.length) % queue.length;
-        startPlayback(queue[currentIndex]);
+        startPlayback(queue[currentIndex], { navigate: routePage && routePage.type === 'song' });
       }
     }
 
