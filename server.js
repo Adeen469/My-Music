@@ -4,6 +4,7 @@
 // If a key is missing, the API returns a clear error instead of fake data.
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 const express = require("express");
 
 // ---- Load .env from the root folder (this file's folder) ----
@@ -31,9 +32,16 @@ const YOUTUBE_API = process.env.YOUTUBE_API_KEY || process.env.YOUTUBE_DATA_API 
 // GROQ_API_KEY is reserved for future AI features. It is read here only
 // so /api/health can report whether it is set — no GROQ feature uses
 // it yet, and its value is never returned to the browser.
-// ADMIN_EMAIL / ADMIN_NAME are reserved for a future admin account.
-// ADMIN_PASSWORD must stay in Vercel env vars only — it is never read
-// into code here, never committed, and no admin login exists yet.
+// Admin panel (built 2026-11-01, user request): sign in at /admin
+// with ADMIN_EMAIL + ADMIN_PASSWORD from Vercel env vars. Those
+// values are NEVER sent to the browser, never logged, and never put
+// in the repo — the server only compares a login attempt against
+// them and issues a signed, HttpOnly session cookie. If either var
+// is missing, admin sign-in fails closed (503). Use a strong, unique
+// password in Vercel; a short default password is not safe for this.
+const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || "").trim();
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "";
+const ADMIN_NAME = (process.env.ADMIN_NAME || "").trim();
 // Google sign-in: ENABLED 2026-11-01 (user added GOOGLE_CLIENT_ID +
 // GOOGLE_CLIENT_SECRET in Vercel and asked to enable it). It turns on
 // automatically when both vars are present, so no AUTH_ENABLED=true
@@ -399,6 +407,131 @@ app.patch("/api/library/download-url", async (req, res) => {
 });
 
 app.delete("/api/library", async (req, res) => {
+  const email = (req.query.email || "").trim();
+  const videoId = (req.query.video_id || "").trim();
+  if (!email || !videoId) return res.status(400).json({ error: "email and video_id are required" });
+  try {
+    await supabaseFetch(
+      `saved_tracks?user_email=eq.${encodeURIComponent(email)}&video_id=eq.${encodeURIComponent(videoId)}`,
+      "DELETE"
+    );
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message });
+  }
+});
+
+// ---- Admin panel (/admin) ----
+// Stateless signed session: the cookie holds {email, exp} plus an
+// HMAC made with ADMIN_PASSWORD, so it works across serverless
+// invocations with no server-side session store. The password itself
+// is never in the cookie, the page, or any API response.
+function adminConfigured() { return Boolean(ADMIN_EMAIL && ADMIN_PASSWORD); }
+function safeEqualString(a, b) {
+  const ab = Buffer.from(String(a || ""), "utf8");
+  const bb = Buffer.from(String(b || ""), "utf8");
+  if (ab.length !== bb.length) return false;
+  try { return crypto.timingSafeEqual(ab, bb); } catch { return false; }
+}
+function signAdminSession() {
+  const payload = Buffer.from(JSON.stringify({ email: ADMIN_EMAIL, exp: Date.now() + 12 * 3600 * 1000 }), "utf8").toString("base64url");
+  const sig = crypto.createHmac("sha256", ADMIN_PASSWORD).update(payload).digest("base64url");
+  return `${payload}.${sig}`;
+}
+function verifyAdminSession(req) {
+  try {
+    if (!adminConfigured()) return false;
+    const token = parseCookies(req).my_music_admin || "";
+    const [payload, sig] = token.split(".");
+    if (!payload || !sig) return false;
+    const expected = crypto.createHmac("sha256", ADMIN_PASSWORD).update(payload).digest("base64url");
+    if (!safeEqualString(sig, expected)) return false;
+    const data = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    return data.email === ADMIN_EMAIL && typeof data.exp === "number" && data.exp > Date.now();
+  } catch { return false; }
+}
+function requireAdmin(req, res, next) {
+  if (!verifyAdminSession(req)) return res.status(401).json({ error: "Admin sign-in required" });
+  next();
+}
+function adminCookie(req, value, maxAge) {
+  const isHttps = (req.get && req.get("x-forwarded-proto") === "https") || req.secure;
+  return `my_music_admin=${encodeURIComponent(value)}; Path=/; Max-Age=${maxAge}; HttpOnly; SameSite=Lax${isHttps ? "; Secure" : ""}`;
+}
+// Basic failed-login throttling, per calling IP, in memory. On
+// serverless it is per-instance, so it slows guessing rather than
+// guaranteeing a global block — the strong-password advice above is
+// still the real protection.
+const adminFailedLogins = new Map();
+function adminRateLimited(ip) {
+  const now = Date.now();
+  const entry = adminFailedLogins.get(ip);
+  if (!entry || now - entry.first > 10 * 60 * 1000) { adminFailedLogins.set(ip, { count: 0, first: now }); return false; }
+  return entry.count >= 10;
+}
+function recordAdminFailure(ip) {
+  const now = Date.now();
+  const entry = adminFailedLogins.get(ip) || { count: 0, first: now };
+  if (now - entry.first > 10 * 60 * 1000) { entry.count = 0; entry.first = now; }
+  entry.count += 1;
+  adminFailedLogins.set(ip, entry);
+}
+app.get("/admin", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "admin.html"));
+});
+app.post("/api/admin/login", (req, res) => {
+  if (!adminConfigured()) return res.status(503).json({ error: "Admin is not configured. Set ADMIN_EMAIL and ADMIN_PASSWORD in Vercel and redeploy." });
+  const ip = ((req.headers["x-forwarded-for"] || "").split(",")[0] || "").trim() || req.ip || "unknown";
+  if (adminRateLimited(ip)) return res.status(429).json({ error: "Too many failed admin sign-in attempts. Try again later." });
+  const { email, password } = req.body || {};
+  // Generic message on purpose: do not reveal whether the email or
+  // the password was the wrong part.
+  if (!safeEqualString((email || "").trim(), ADMIN_EMAIL) || !safeEqualString(password || "", ADMIN_PASSWORD)) {
+    recordAdminFailure(ip);
+    return res.status(401).json({ error: "Invalid admin email or password" });
+  }
+  adminFailedLogins.delete(ip);
+  res.setHeader("Set-Cookie", adminCookie(req, signAdminSession(), 12 * 3600));
+  res.json({ ok: true, admin: { name: ADMIN_NAME, email: ADMIN_EMAIL } });
+});
+app.post("/api/admin/logout", (req, res) => {
+  res.setHeader("Set-Cookie", adminCookie(req, "", 0));
+  res.json({ ok: true });
+});
+app.get("/api/admin/me", (req, res) => {
+  if (!verifyAdminSession(req)) return res.json({ admin: null });
+  res.json({ admin: { name: ADMIN_NAME, email: ADMIN_EMAIL } });
+});
+app.get("/api/admin/health", requireAdmin, (req, res) => {
+  res.json({
+    admin: { name: ADMIN_NAME, email: ADMIN_EMAIL },
+    youtubeConfigured: Boolean(YOUTUBE_API),
+    googleConfigured: Boolean(GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET),
+    supabaseConfigured: Boolean(SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY),
+    groqConfigured: Boolean(process.env.GROQ_API_KEY),
+    authEnabled: AUTH_ENABLED,
+  });
+});
+app.get("/api/admin/youtube-test", requireAdmin, async (req, res) => {
+  const q = (req.query.q || "").trim();
+  if (!q) return res.status(400).json({ error: "Missing ?q=" });
+  try {
+    const data = await youtube("search", { part: "snippet", type: "video", q, maxResults: "5", order: "relevance", regionCode: "IN" });
+    const withDurations = await mergeDurations((data.items || []).map(mapVideo));
+    res.json({ items: await filterAvailableInIndia(withDurations) });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message });
+  }
+});
+app.get("/api/admin/saved-tracks", requireAdmin, async (req, res) => {
+  try {
+    const rows = await supabaseFetch("saved_tracks?select=user_email,video_id,title,channel,thumbnail,created_at&order=created_at.desc&limit=100");
+    res.json({ tracks: rows || [], supabaseConfigured: true });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message });
+  }
+});
+app.delete("/api/admin/saved-tracks", requireAdmin, async (req, res) => {
   const email = (req.query.email || "").trim();
   const videoId = (req.query.video_id || "").trim();
   if (!email || !videoId) return res.status(400).json({ error: "email and video_id are required" });
