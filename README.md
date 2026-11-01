@@ -10,8 +10,8 @@ empty state and a clear message instead of fake songs.
 - Home with trending music (YouTube category: Music)
 - Search songs, artists and albums
 - Bottom player using the YouTube embed player
-- Sign in with Google (OAuth 2.0)
-- Save tracks to your Library, stored in Supabase (`saved_tracks` table)
+- No sign-in needed (for now): Google sign-in is disabled — see “Authentication” below
+- Save tracks to your Library, stored in this browser while sign-in is disabled
 - Download + Offline: every card and the player have a Download button,
   plus “Save to a folder…” where the browser supports a save picker.
   Downloaded copies are also kept in the browser (IndexedDB) under
@@ -23,29 +23,48 @@ empty state and a clear message instead of fake songs.
    ```bash
    npm install
    ```
-2. Fill in the `.env` file in the **root folder** of this repo:
-   ```env
-   YOUTUBE_DATA_API=
-   GOOGLE_CLIENT_ID=
-   GOOGLE_CLIENT_SECRET=
-   GOOGLE_REDIRECT_URI=http://localhost:3000/auth/google/callback
-   SUPABASE_URL=
-   SUPABASE_ANON_KEY=
-   SUPABASE_SERVICE_ROLE_KEY=
-   PORT=3000
-   ```
-   A blank template is also in `.env.example`. **Do not paste real keys in chat,
-   and do not commit a filled-in `.env`** — it is gitignored. For deployment,
-   set the same names as environment variables in your hosting dashboard.
+2. Fill in the `.env` file in the **root folder** of this repo — see
+   `.env.example` for the full blank template (it lists `YOUTUBE_API_KEY`,
+   `GROQ_API_KEY`, `AUTH_ENABLED`, Google, Supabase and `ADMIN_*` names,
+   all blank). **Do not paste real keys in chat, and do not commit a
+   filled-in `.env`** — it is gitignored. For deployment, set the same
+   names as environment variables in your hosting dashboard.
 3. In Supabase, run `supabase/schema.sql` in the SQL Editor to create the
-   `saved_tracks` table. No sample rows are inserted.
-4. In Google Cloud Console, add `http://localhost:3000/auth/google/callback`
-   as an authorised redirect URI for your OAuth client.
+   `saved_tracks` table. No sample rows are inserted. (Not needed while
+   sign-in is disabled — Library is local then — but keep it for when
+   sign-in returns.)
+4. Google sign-in is disabled for now, so skip the Google Cloud callback
+   step until you re-enable it with `AUTH_ENABLED=true` (see
+   “Authentication” below).
 5. Run it:
    ```bash
    npm start
    ```
    Then open http://localhost:3000
+
+## Authentication — disabled for now
+
+Google sign-in is **disabled** (2026-11-01 decision): the app needs no
+account at all right now. The top bar shows “No sign-in needed”, the
+Google routes return 503, and Library / Save work locally in the
+browser (`localStorage`) instead of Supabase.
+
+The Google code is **kept, not deleted**, so it can come back later:
+set `AUTH_ENABLED=true` in Vercel, keep `GOOGLE_CLIENT_ID`,
+`GOOGLE_CLIENT_SECRET` and the callback URI configured, and redeploy.
+
+## Environment variables in Vercel
+
+- `YOUTUBE_API_KEY` — the YouTube Data API key (the older name
+  `YOUTUBE_DATA_API` also works). Without it, search/trending show the
+  “API not connected” message instead of fake songs.
+- `GROQ_API_KEY` — reserved for future AI features. It is only reported
+  as set/unset by `/api/health`; nothing uses it yet.
+- `ADMIN_EMAIL`, `ADMIN_NAME`, `ADMIN_PASSWORD` — reserved for a future
+  default admin account. **No admin login exists yet**, and no admin
+  password is in this repo. Set the password only as a Vercel env var,
+  make it a strong unique password (do not use a short default), and
+  never commit it or paste it in chat.
 
 ## Downloads & offline — where files actually go
 
@@ -123,12 +142,15 @@ that is actually used.
 
 After importing the repo into Vercel, set these environment variables in the
 Vercel project settings (Production) — do not paste real values in chat:
-`YOUTUBE_DATA_API`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`,
-`SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, and
+`YOUTUBE_API_KEY` (or `YOUTUBE_DATA_API`), `GROQ_API_KEY`,
+`ADMIN_EMAIL`, `ADMIN_NAME`, `ADMIN_PASSWORD` (Vercel only, strong password),
+plus Supabase vars if you use them later. Google vars are only needed when
+you re-enable sign-in with `AUTH_ENABLED=true`, with
 `GOOGLE_REDIRECT_URI` set to `https://<your-project>.vercel.app/auth/google/callback`
 (also add that URL as an authorised redirect URI in Google Cloud Console).
-Then redeploy. Until those variables are set, the deployed site will load
-but show the same "API not connected" message as locally.
+Then redeploy. Until the YouTube key is set, the deployed site will load
+but show the same "API not connected" message as locally. Adding or changing
+an env var in Vercel needs a redeploy to take effect.
 
 ## Project structure
 

@@ -25,7 +25,21 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
 const PORT = process.env.PORT || 3000;
-const YOUTUBE_API = process.env.YOUTUBE_DATA_API || process.env.YOUTUBE_API_KEY || "";
+// YouTube key: the name used in Vercel is YOUTUBE_API_KEY; the older
+// YOUTUBE_DATA_API name still works as a fallback. Either one is fine.
+const YOUTUBE_API = process.env.YOUTUBE_API_KEY || process.env.YOUTUBE_DATA_API || "";
+// GROQ_API_KEY is reserved for future AI features. It is read here only
+// so /api/health can report whether it is set — no GROQ feature uses
+// it yet, and its value is never returned to the browser.
+// ADMIN_EMAIL / ADMIN_NAME are reserved for a future admin account.
+// ADMIN_PASSWORD must stay in Vercel env vars only — it is never read
+// into code here, never committed, and no admin login exists yet.
+// Google sign-in is DISABLED for now (2026-11-01, user decision):
+// no authentication is required to use the app. The Google routes
+// below are kept, not deleted, and return 503 while disabled.
+// To bring Google sign-in back later, set AUTH_ENABLED=true in Vercel
+// (and keep GOOGLE_CLIENT_ID/SECRET + the callback URI configured).
+const AUTH_ENABLED = process.env.AUTH_ENABLED === "true";
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || "";
 const GOOGLE_REDIRECT_URI =
@@ -88,13 +102,15 @@ async function youtube(pathname, params) {
 app.get("/api/health", (req, res) => {
   res.json({
     ok: true,
+    authEnabled: AUTH_ENABLED,
     youtubeConfigured: Boolean(YOUTUBE_API),
+    groqConfigured: Boolean(process.env.GROQ_API_KEY),
     googleConfigured: Boolean(GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET),
     supabaseConfigured: Boolean(SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY),
   });
 });
 
-app.get("/api/me", (req, res) => res.json({ user: getUser(req) }));
+app.get("/api/me", (req, res) => res.json({ user: AUTH_ENABLED ? getUser(req) : null, authEnabled: AUTH_ENABLED }));
 
 // ---- YouTube Data API (proxied so the API key never reaches the browser) ----
 app.get("/api/search", async (req, res) => {
@@ -146,8 +162,9 @@ app.get("/api/related/:id", async (req, res) => {
   }
 });
 
-// ---- Google sign-in (OAuth 2.0) ----
+// ---- Google sign-in (OAuth 2.0) — DISABLED unless AUTH_ENABLED=true ----
 app.get("/auth/google", (req, res) => {
+  if (!AUTH_ENABLED) return res.status(503).send("Google sign-in is disabled for now. No sign-in is needed to use My Music.");
   if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
     return res.status(503).send("GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET are not set in .env");
   }
@@ -162,6 +179,7 @@ app.get("/auth/google", (req, res) => {
 });
 
 app.get("/auth/google/callback", async (req, res) => {
+  if (!AUTH_ENABLED) return res.status(503).send("Google sign-in is disabled for now.");
   const code = req.query.code;
   if (!code) return res.status(400).send("Missing code");
   try {

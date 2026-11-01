@@ -66,6 +66,12 @@ async function saveOfflineCopy(item, blob) {
 }
 async function getOfflineCopies() { try { return await idb("getAll"); } catch { return []; } }
 function localFileTracks() { try { return JSON.parse(localStorage.getItem("my_music_file_tracks") || "[]"); } catch { return []; } }
+function localSavedTracks() { try { return JSON.parse(localStorage.getItem("my_music_saved_tracks") || "[]"); } catch { return []; } }
+function addLocalSavedTrack(item) {
+  const list = localSavedTracks();
+  if (!list.some((t) => t.id === item.id)) list.push({ id: item.id, title: item.title, channel: item.channel, thumbnail: item.thumbnail || "", downloadUrl: item.downloadUrl || null });
+  localStorage.setItem("my_music_saved_tracks", JSON.stringify(list));
+}
 function addLocalFileTrack(item) {
   const list = localFileTracks();
   if (!list.some((t) => t.id === item.id)) list.push(item);
@@ -232,7 +238,16 @@ async function loadTrending() {
 }
 async function loadLibrary() {
   titleEl.textContent = "Your Library"; addFileBox.hidden = true;
-  if (!user) { showNotice("Sign in with Google to see your saved tracks."); renderGrid([]); return; }
+  // No sign-in for now: Library is the tracks saved in this browser.
+  // (When Google sign-in returns, this goes back to Supabase.)
+  const local = localSavedTracks();
+  if (!user) {
+    noticeEl.hidden = true;
+    const pl0 = document.getElementById("playlistList");
+    pl0.innerHTML = local.length ? "" : '<p class="hint">Saved tracks appear here as a playlist.</p>';
+    if (local.length) { const b = document.createElement("button"); b.className = "playlist-item"; b.textContent = `Saved tracks (${local.length})`; b.onclick = () => showView("library"); pl0.appendChild(b); }
+    renderGrid(local, { list: local }); return;
+  }
   const res = await fetch(`/api/library?email=${encodeURIComponent(user.email)}`); const data = await res.json();
   if (!res.ok) { showNotice(data.error || "Could not load library."); renderGrid([]); return; }
   lastLibrary = data.tracks || []; noticeEl.hidden = true;
@@ -316,7 +331,7 @@ document.getElementById("expandBtn").addEventListener("click", () => { if (curre
 document.getElementById("collapseBtn").addEventListener("click", () => { document.getElementById("expanded").hidden = true; });
 document.getElementById("saveBtn").addEventListener("click", async () => {
   if (!current) return;
-  if (!user) { alert("Sign in with Google first, then save."); return; }
+  if (!user) { addLocalSavedTrack(current); alert("Saved to your Library in this browser (no sign-in for now)."); return; }
   const res = await fetch("/api/library", { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({ email: user.email, video_id: current.id, title: current.title, channel: current.channel, thumbnail: current.thumbnail, download_url: current.downloadUrl || "" }) });
   const data = await res.json(); alert(res.ok ? "Saved to your Library." : (data.error || "Could not save."));
 });
@@ -334,10 +349,9 @@ document.getElementById("addFileForm").addEventListener("submit", async (e) => {
 });
 (async () => {
   const health = await (await fetch("/api/health")).json();
-  if (!health.youtubeConfigured) showNotice("YouTube API is not connected yet: add YOUTUBE_DATA_API to the .env file in the root folder, then restart the server. No sample songs are shown in the meantime.");
-  const me = await (await fetch("/api/me")).json(); user = me.user;
-  authArea.innerHTML = user
-    ? `<span class="avatar">${escapeHtml((user.name || user.email || "?")[0].toUpperCase())}</span> &nbsp; <a href="/auth/logout">Sign out</a>`
-    : `<a href="/auth/google">Sign in with Google</a>`;
+  if (!health.youtubeConfigured) showNotice("YouTube API is not connected yet: set YOUTUBE_API_KEY in Vercel env vars (or YOUTUBE_DATA_API locally), then redeploy. No sample songs are shown in the meantime.");
+  const me = await (await fetch("/api/me")).json(); user = me.authEnabled ? me.user : null;
+  // Google sign-in is disabled for now: no sign-in button, no account needed.
+  authArea.innerHTML = `<span class="avatar">♪</span> &nbsp; <span style="color:#AAAAAA">No sign-in needed</span>`;
   loadTrending();
 })();
