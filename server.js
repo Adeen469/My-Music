@@ -110,6 +110,41 @@ function mapVideo(item) {
     durationSeconds: item.contentDetails ? parseDuration(item.contentDetails.duration) : null,
   };
 }
+// India availability filter (added 2026-11-01, user request):
+// Do not show videos that cannot play in India. YouTube's search
+// regionCode alone is not reliable, so every list is also checked
+// against videos.list, which reports the real availability:
+//  - a video videos.list does not return at all = removed / private
+//  - status.privacyStatus != "public" = not publicly playable
+//  - status.embeddable === false = cannot play in My Music's hidden
+//    YouTube player at all, so showing it only leads to a stuck 0:00
+//  - contentDetails.regionRestriction.blocked contains "IN", or
+//    .allowed exists and does not contain "IN" = blocked in India
+// If the availability check itself fails (API outage), fail open and
+// return the list unfiltered rather than blanking the whole app.
+function isAvailableInIndia(detail) {
+  if (!detail) return false;
+  if (detail.status && detail.status.privacyStatus && detail.status.privacyStatus !== "public") return false;
+  if (detail.status && detail.status.embeddable === false) return false;
+  const rr = (detail.contentDetails && detail.contentDetails.regionRestriction) || null;
+  if (!rr) return true;
+  if (Array.isArray(rr.blocked) && rr.blocked.includes("IN")) return false;
+  if (Array.isArray(rr.allowed) && !rr.allowed.includes("IN")) return false;
+  return true;
+}
+async function filterAvailableInIndia(items) {
+  if (!items || !items.length) return items;
+  try {
+    const kept = [];
+    for (let i = 0; i < items.length; i += 50) {
+      const chunk = items.slice(i, i + 50);
+      const data = await youtube("videos", { part: "status,contentDetails", id: chunk.map((x) => x.id).filter(Boolean).join(",") });
+      const byId = new Map((data.items || []).map((it) => [typeof it.id === "string" ? it.id : it.id.videoId, it]));
+      for (const x of chunk) if (isAvailableInIndia(byId.get(x.id))) kept.push(x);
+    }
+    return kept;
+  } catch { return items; }
+}
 // Search/related/artist use the search endpoint, which has no duration.
 // One cheap videos.list call (cost 1) fills durations for all ids.
 async function mergeDurations(items) {
@@ -161,9 +196,10 @@ app.get("/api/search", async (req, res) => {
   if (!q) return res.status(400).json({ error: "Missing ?q=" });
   try {
     const data = await youtube("search", {
-      part: "snippet", type: "video", q, maxResults: "25", order: "relevance",
+      part: "snippet", type: "video", q, maxResults: "25", order: "relevance", regionCode: "IN",
     });
-    res.json({ items: await mergeDurations((data.items || []).map(mapVideo)) });
+    const withDurations = await mergeDurations((data.items || []).map(mapVideo));
+    res.json({ items: await filterAvailableInIndia(withDurations) });
   } catch (e) {
     res.status(e.status || 500).json({ error: e.message });
   }
@@ -172,10 +208,10 @@ app.get("/api/search", async (req, res) => {
 app.get("/api/trending", async (req, res) => {
   try {
     const data = await youtube("videos", {
-      part: "snippet,statistics,contentDetails", chart: "mostPopular",
-      videoCategoryId: "10", maxResults: "25",
+      part: "snippet,statistics,contentDetails,status", chart: "mostPopular",
+      videoCategoryId: "10", maxResults: "25", regionCode: "IN",
     });
-    res.json({ items: (data.items || []).map(mapVideo) });
+    res.json({ items: await filterAvailableInIndia((data.items || []).map(mapVideo)) });
   } catch (e) {
     res.status(e.status || 500).json({ error: e.message });
   }
@@ -184,10 +220,11 @@ app.get("/api/trending", async (req, res) => {
 app.get("/api/video/:id", async (req, res) => {
   try {
     const data = await youtube("videos", {
-      part: "snippet,statistics,contentDetails", id: req.params.id,
+      part: "snippet,statistics,contentDetails,status", id: req.params.id,
     });
     const item = (data.items || [])[0];
     if (!item) return res.status(404).json({ error: "Video not found" });
+    if (!isAvailableInIndia(item)) return res.status(404).json({ error: "Video not available in India" });
     res.json(mapVideo(item));
   } catch (e) {
     res.status(e.status || 500).json({ error: e.message });
@@ -199,9 +236,9 @@ app.get("/api/artist/:name", async (req, res) => {
   if (!name) return res.status(400).json({ error: "Missing artist name" });
   try {
     const data = await youtube("search", {
-      part: "snippet", type: "video", q: name, maxResults: "25", order: "relevance",
+      part: "snippet", type: "video", q: name, maxResults: "25", order: "relevance", regionCode: "IN",
     });
-    const all = await mergeDurations((data.items || []).map(mapVideo));
+    const all = await filterAvailableInIndia(await mergeDurations((data.items || []).map(mapVideo)));
     // Only songs actually by this channel, not just relevance matches.
     const exact = all.filter((t) => t.channel.toLowerCase() === name.toLowerCase());
     res.json({ items: exact, searched: all.length, exact: exact.length });
@@ -213,9 +250,10 @@ app.get("/api/artist/:name", async (req, res) => {
 app.get("/api/related/:id", async (req, res) => {
   try {
     const data = await youtube("search", {
-      part: "snippet", type: "video", relatedToVideoId: req.params.id, maxResults: "12",
+      part: "snippet", type: "video", relatedToVideoId: req.params.id, maxResults: "12", regionCode: "IN",
     });
-    res.json({ items: await mergeDurations((data.items || []).map(mapVideo)) });
+    const withDurations = await mergeDurations((data.items || []).map(mapVideo));
+    res.json({ items: await filterAvailableInIndia(withDurations) });
   } catch (e) {
     res.status(e.status || 500).json({ error: e.message });
   }
